@@ -35,6 +35,47 @@
     app.opts.model_id = m.id; app.saveOpts();
     app.toast(`Kullanılacak model: ${m.name}`, 'ok');
   }
+  // kartta görünen teknik künye: motor, bu bilgisayarda nerede çalışır, nicemleme, bellek, adım, hız/kalite
+  const gpu = $derived(app.hw?.gpu_kind ?? 'none');
+  function specs(m: Model): [string, string][] {
+    const p: any = (m as any).params ?? {};
+    const vram = m.min_vram_gb ? `≥ ${m.min_vram_gb} GB` : '—';
+    const ram = m.min_ram_gb ? `≥ ${m.min_ram_gb} GB` : '—';
+    if (m.backend === 'lama') {
+      const onGpu = gpu === 'nvidia';
+      return [
+        ['Motor', onGpu ? 'PyTorch · CUDA' : 'ONNX Runtime'],
+        ['Bu PC’de', onGpu ? 'Ekran kartı' : 'İşlemci'],
+        ['Hassasiyet', 'FP32'],
+        ['Çalışma', '512 px pencere'],
+        ['VRAM', onGpu ? vram : '—'],
+        ['RAM', ram],
+      ];
+    }
+    if (m.backend === 'sdcpp') {
+      const where = gpu === 'nvidia' ? 'GPU · CUDA' : gpu === 'other' ? 'GPU · Vulkan' : 'CPU · çok yavaş';
+      return [
+        ['Motor', 'sd.cpp'],
+        ['Bu PC’de', where],
+        ['Nicemleme', 'GGUF Q4_K_M'],
+        ['Adım', String(p.steps ?? '—')],
+        ['VRAM', vram],
+        ['RAM', ram],
+      ];
+    }
+    if (m.backend === 'sdnq') {
+      return [
+        ['Motor', 'SDNQ · diffusers'],
+        ['Bu PC’de', 'GPU · CUDA'],
+        ['Nicemleme', '4-bit dinamik'],
+        ['Adım', String(p.steps ?? '—')],
+        ['VRAM', vram],
+        ['RAM', ram],
+      ];
+    }
+    return [];
+  }
+
   const usedBytes = $derived(app.models.filter((m) => m.installed).reduce((n, m) => n + m.total_bytes, 0));
   const gpuLine = $derived(
     !app.hw ? '' : app.hw.gpu_kind === 'none' ? 'Ekran kartı bulunamadı: yeniden çizim yavaş olur, hızlı silme sorunsuz çalışır.' : app.hw.gpu_name,
@@ -96,6 +137,17 @@
                   {/if}
                 </div>
               </div>
+
+              {#if specs(m).length}
+                <div class="mt-3 grid grid-cols-3 gap-[1.5px] bg-ink border-[1.5px] border-ink">
+                  {#each specs(m) as [k, v]}
+                    <div class="bg-sheet px-2.5 py-1.5 flex items-baseline gap-2">
+                      <span class="eyebrow !text-[9.5px] w-[68px] shrink-0">{k}</span>
+                      <span class="mono text-[11.5px] font-semibold truncate" title={v}>{v}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
 
               {#if failed(m)}<div class="text-[12px] text-red mt-2 leading-4 select-text">Kurulum yapılamadı: {dls(m)?.file}</div>{/if}
 
