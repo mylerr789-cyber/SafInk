@@ -43,9 +43,9 @@ def edit(msg):
 
     img = Image.open(msg["image"]).convert("RGB")
     w, h = img.size
-    w16, h16 = max(64, (w + 15) // 16 * 16), max(64, (h + 15) // 16 * 16)
-    if (w16, h16) != (w, h):
-        img = img.resize((w16, h16), Image.LANCZOS)
+    if w % 16 or h % 16:
+        raise ValueError(f"image size {w}x{h} must be a multiple of 16 (Rust side pads; no resizing)")
+    w16, h16 = w, h
     gen = torch.Generator(device="cpu").manual_seed(int(msg.get("seed", 1)))
     out = pipe(
         image=img,

@@ -5,7 +5,7 @@ use crate::catalog::ModelSpec;
 use crate::paths::AppPaths;
 use crate::settings::Settings;
 use anyhow::{anyhow, bail, Context, Result};
-use image::{imageops::FilterType, DynamicImage, GrayImage, RgbImage};
+use image::{GrayImage, RgbImage};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -41,20 +41,18 @@ impl SdCppInpainter {
     fn ps(&self, key: &str, default: &str) -> String { self.spec.params.get(key).and_then(|v| v.as_str()).unwrap_or(default).to_string() }
 }
 
-fn round16(v: u32) -> u32 { ((v + 15) / 16 * 16).max(64) }
-
 impl Inpainter for SdCppInpainter {
     fn label(&self) -> String { format!("sd.cpp · {}", self.spec.name) }
-    fn policy(&self) -> WindowPolicy { WindowPolicy::Flexible { max: 1024, min: 256 } }
+    fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
 
     fn inpaint(&mut self, img: &RgbImage, _mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         self.counter += 1;
         let (w0, h0) = img.dimensions();
-        let (w, h) = (round16(w0), round16(h0));
+        let padded = super::pad16(img);
+        let (w, h) = padded.dimensions();
         let inp = self.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.workdir.join(format!("out_{}.png", self.counter));
-        let scaled = if (w, h) != (w0, h0) { image::imageops::resize(img, w, h, FilterType::Lanczos3) } else { img.clone() };
-        scaled.save(&inp)?;
+        padded.save(&inp)?;
 
         let mut cmd = Command::new(&self.exe);
         cmd.current_dir(self.exe.parent().unwrap());
@@ -116,7 +114,6 @@ impl Inpainter for SdCppInpainter {
         for p in [&inp, &outp] {
             let _ = std::fs::remove_file(p);
         }
-        let out = DynamicImage::ImageRgb8(out);
-        Ok(if out.width() != w0 || out.height() != h0 { image::imageops::resize(&out.to_rgb8(), w0, h0, FilterType::Lanczos3) } else { out.to_rgb8() })
+        super::crop_to(out, w0, h0, (w, h))
     }
 }

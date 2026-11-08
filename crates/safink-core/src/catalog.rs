@@ -52,7 +52,7 @@ pub struct ModelSpec {
     pub recommended: bool,
     #[serde(default)]
     pub hf_repo: String,
-    /// Modele özel sabitler: steps, guidance, cfg, sampler, prompt, offload, pipeline, max_side.
+    /// Modele özel sabitler: steps, guidance, cfg, sampler, prompt, offload, pipeline, max_width, max_pixels, seg_h, overlap.
     #[serde(default)]
     pub params: serde_json::Value,
     #[serde(default)]

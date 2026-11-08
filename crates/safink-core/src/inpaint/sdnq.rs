@@ -8,7 +8,7 @@ use crate::catalog::ModelSpec;
 use crate::paths::AppPaths;
 use crate::settings::Settings;
 use anyhow::{bail, Result};
-use image::{imageops::FilterType, GrayImage, RgbImage};
+use image::{GrayImage, RgbImage};
 use std::sync::atomic::Ordering;
 
 const WORKER_PY: &str = include_str!("sdnq_worker.py");
@@ -19,7 +19,6 @@ pub struct SdnqInpainter {
     counter: u32,
     steps: u32,
     guidance: f64,
-    max_side: u32,
     prompt: String,
 }
 
@@ -33,7 +32,6 @@ impl SdnqInpainter {
             counter: 0,
             steps: pu("steps", 4) as u32,
             guidance: spec.params.get("guidance").and_then(|v| v.as_f64()).unwrap_or(1.0),
-            max_side: pu("max_side", 1024) as u32,
             prompt: spec.params.get("prompt").and_then(|v| v.as_str()).unwrap_or("Remove all text.").to_string(),
         };
         let load = serde_json::json!({
@@ -52,7 +50,7 @@ impl SdnqInpainter {
 
 impl Inpainter for SdnqInpainter {
     fn label(&self) -> String { format!("SDNQ · {}", self.spec.name) }
-    fn policy(&self) -> WindowPolicy { WindowPolicy::Flexible { max: self.max_side, min: 256 } }
+    fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
     fn inpaint(&mut self, img: &RgbImage, _mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
             bail!("iptal edildi");
@@ -61,7 +59,9 @@ impl Inpainter for SdnqInpainter {
         let (w0, h0) = img.dimensions();
         let inp = self.w.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.w.workdir.join(format!("out_{}.png", self.counter));
-        img.save(&inp)?;
+        let padded = super::pad16(img);
+        let pd = padded.dimensions();
+        padded.save(&inp)?;
         let r = self.w.call(&serde_json::json!({
             "cmd": "edit", "image": inp.to_string_lossy(), "out": outp.to_string_lossy(),
             "prompt": self.prompt, "steps": self.steps, "guidance": self.guidance, "seed": 1,
@@ -73,6 +73,6 @@ impl Inpainter for SdnqInpainter {
         for p in [&inp, &outp] {
             let _ = std::fs::remove_file(p);
         }
-        Ok(if out.dimensions() != (w0, h0) { image::imageops::resize(&out, w0, h0, FilterType::Lanczos3) } else { out })
+        super::crop_to(out, w0, h0, pd)
     }
 }

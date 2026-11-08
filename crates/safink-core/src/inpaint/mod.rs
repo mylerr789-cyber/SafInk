@@ -16,8 +16,9 @@ use std::sync::atomic::AtomicBool;
 pub enum WindowPolicy {
     /// Sabit kare pencere (ONNX, 512).
     Fixed(u32),
-    /// Yazı grubuna göre kırpılan değişken pencere (redraw): en çok `max` px.
-    Flexible { max: u32, min: u32 },
+    /// Tam sayfa (redraw): sayfa bütün gider; yüksekliği `seg_h`'yi aşan şeritler `overlap` px örtüşen dilimlere bölünür.
+    /// Genişlik `max_w`, alan `max_px` aşılırsa hata (küçültme yok).
+    Page { seg_h: u32, overlap: u32, max_w: u32, max_px: u64 },
 }
 
 pub struct Ctx<'a> {
@@ -56,6 +57,23 @@ pub fn pad_rgb(img: &RgbImage, w: u32, h: u32) -> RgbImage {
         }
     }
     out
+}
+/// Boyutları 16'nın katına kenar çoğaltarak tamamlar (ölçekleme yok); sonucu `crop_to` ile özgün boyuta kırpın.
+pub fn pad16(img: &RgbImage) -> RgbImage {
+    let r = |v: u32| ((v + 15) / 16 * 16).max(64);
+    pad_rgb(img, r(img.width()), r(img.height()))
+}
+/// Model çıktısını dolgusuz özgün boyuta kırpar; beklenmeyen boyutta hata (ölçekleme yapılmaz).
+pub fn crop_to(out: RgbImage, w: u32, h: u32, padded: (u32, u32)) -> Result<RgbImage> {
+    if out.dimensions() != padded {
+        bail!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", out.width(), out.height(), padded.0, padded.1);
+    }
+    Ok(image::imageops::crop_imm(&out, 0, 0, w, h).to_image())
+}
+/// Redraw modelleri için tam sayfa politikası (katalog `params`: seg_h, overlap, max_width, max_pixels).
+pub fn page_policy(params: &serde_json::Value) -> WindowPolicy {
+    let u = |k: &str, d: u64| params.get(k).and_then(|v| v.as_u64()).unwrap_or(d);
+    WindowPolicy::Page { seg_h: u("seg_h", 2000) as u32, overlap: u("overlap", 200) as u32, max_w: u("max_width", 2048) as u32, max_px: u("max_pixels", 6_300_000) }
 }
 pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
     let mut out = GrayImage::new(w, h);

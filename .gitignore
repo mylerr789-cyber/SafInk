@@ -19,3 +19,6 @@ ui/mockup.html
 *.safetensors
 *.pt
 *.ckpt
+
+# test sonuçları (telifli sayfalar)
+docs/test-results/

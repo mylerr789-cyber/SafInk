@@ -166,6 +166,7 @@
     "guidance": 1.0,
     "sampler": "euler",
     "offload": true,
+    "max_width": 2048,
     "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork."
    },
    "files": [
@@ -211,7 +212,7 @@
     "pipeline": "Flux2KleinPipeline",
     "steps": 4,
     "guidance": 1.0,
-    "max_side": 1024,
+    "max_width": 2048,
     "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork."
    },
    "files": [
