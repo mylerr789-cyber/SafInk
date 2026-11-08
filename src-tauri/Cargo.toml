@@ -1,0 +1,25 @@
+[package]
+name = "safink"
+version.workspace = true
+edition.workspace = true
+description = "SafInk – toplu manga/webtoon temizleme"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+safink-core = { path = "../crates/safink-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+percent-encoding = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+cuda = ["safink-core/cuda"]

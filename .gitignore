@@ -1,0 +1,21 @@
+target/
+node_modules/
+ui/dist/
+ui/.svelte-kit/
+*.log
+api_key*
+.env
+
+# telif hakkı: ticari manga sayfaları (yalnızca yerel geliştirme)
+ui/mock/*.jpg
+ui/mock/*.png
+docs/screens/
+old-ui/
+ui/mockup.html
+.claude/
+*.part
+*.onnx
+*.gguf
+*.safetensors
+*.pt
+*.ckpt

@@ -1,0 +1,365 @@
+{
+ "version": 2,
+ "sdcpp_tag": "master-1063-3d315c4",
+ "models": [
+  {
+   "id": "lama-manga",
+   "name": "LaMa Manga",
+   "backend": "lama",
+   "kind": "inpaint",
+   "adapter": "lama01",
+   "recommended": true,
+   "description": "Hızlı, düz ve sade arka planlar için. Çoğu sayfa için en iyi başlangıç.",
+   "license": "MIT",
+   "license_url": "https://huggingface.co/mayocream/lama-manga",
+   "min_vram_gb": 1,
+   "min_ram_gb": 4,
+   "params": {
+    "torch": "spandrel_prefixed"
+   },
+   "files": [
+    {
+     "name": "lama-manga.onnx",
+     "role": "model",
+     "url": "https://huggingface.co/mayocream/lama-manga-onnx/resolve/main/lama-manga.onnx",
+     "sha256": "4512adab295ee5a5e02ccd1bdf8d45dccbac88309d9cff1532ffd5de876f02a4",
+     "size": 207482644,
+     "only": "cpu"
+    },
+    {
+     "name": "lama-manga.safetensors",
+     "role": "torch",
+     "url": "https://huggingface.co/mayocream/lama-manga/resolve/main/lama-manga.safetensors",
+     "sha256": "a790515e9da839b8d89af7d565ceb110d908b7d6fbdb991f2acb2ec7d9b08bdb",
+     "size": 204332996,
+     "only": "cuda"
+    }
+   ]
+  },
+  {
+   "id": "lama-big",
+   "name": "LaMa Genel",
+   "backend": "lama",
+   "kind": "inpaint",
+   "adapter": "lama255",
+   "description": "Karışık ve dokulu arka planlar için genel amaçlı sürüm.",
+   "license": "Apache-2.0",
+   "license_url": "https://github.com/advimman/lama",
+   "min_vram_gb": 1,
+   "min_ram_gb": 4,
+   "params": {
+    "torch": "auto"
+   },
+   "files": [
+    {
+     "name": "lama_fp32.onnx",
+     "role": "model",
+     "url": "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx",
+     "sha256": "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6",
+     "size": 208044816,
+     "only": "cpu"
+    },
+    {
+     "name": "big-lama.pt",
+     "role": "torch",
+     "url": "https://huggingface.co/fashn-ai/LaMa/resolve/main/big-lama.pt",
+     "sha256": "7ba7aa7ac37a4d41fdbbeba3a2af7ead18058552997e3a3cd1a3b2210c9e6b4c",
+     "size": 205803670,
+     "only": "cuda"
+    }
+   ]
+  },
+  {
+   "id": "tool-sdcpp-vulkan",
+   "name": "sd.cpp master-1063-3d315c4 Vulkan",
+   "backend": "tool",
+   "kind": "runtime",
+   "variant": "vulkan",
+   "description": "NVIDIA dışı ekran kartları (AMD/Intel).",
+   "license": "MIT",
+   "license_url": "https://github.com/leejet/stable-diffusion.cpp",
+   "files": [
+    {
+     "name": "sd-master-3d315c4-bin-win-vulkan-x64.zip",
+     "role": "archive",
+     "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-win-vulkan-x64.zip",
+     "sha256": "c26c8b5c63c2d913b55ebf0d34f7569c1e83292db6593cb391cb306987c2b678",
+     "size": 29947836,
+     "only": ""
+    }
+   ]
+  },
+  {
+   "id": "tool-sdcpp-cuda12",
+   "name": "sd.cpp master-1063-3d315c4 CUDA 12",
+   "backend": "tool",
+   "kind": "runtime",
+   "variant": "cuda12",
+   "description": "NVIDIA ekran kartları.",
+   "license": "MIT",
+   "license_url": "https://github.com/leejet/stable-diffusion.cpp",
+   "files": [
+    {
+     "name": "sd-master-3d315c4-bin-win-cuda12-x64.zip",
+     "role": "archive",
+     "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-win-cuda12-x64.zip",
+     "sha256": "8bf0ea1bf67658342b289222c36bd9fb78fa4329044a42538e60fdeb3a3e4883",
+     "size": 366924965,
+     "only": ""
+    },
+    {
+     "name": "cudart-sd-bin-win-cu12-x64.zip",
+     "role": "archive",
+     "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/cudart-sd-bin-win-cu12-x64.zip",
+     "sha256": "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d",
+     "size": 563452046,
+     "only": ""
+    }
+   ]
+  },
+  {
+   "id": "tool-sdcpp-cpu",
+   "name": "sd.cpp master-1063-3d315c4 CPU",
+   "backend": "tool",
+   "kind": "runtime",
+   "variant": "cpu",
+   "description": "Ekran kartı yok.",
+   "license": "MIT",
+   "license_url": "https://github.com/leejet/stable-diffusion.cpp",
+   "files": [
+    {
+     "name": "sd-master-3d315c4-bin-win-cpu-x64.zip",
+     "role": "archive",
+     "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-win-cpu-x64.zip",
+     "sha256": "70756796076372b831ef2a4e27673e86b4aa33db1df8aa8e2ec955424fb805c8",
+     "size": 18172997,
+     "only": ""
+    }
+   ]
+  },
+  {
+   "id": "tool-sdnq-env",
+   "name": "Python ortamı",
+   "backend": "tool",
+   "kind": "runtime",
+   "variant": "python",
+   "description": "uv ile yönetilen Python 3.12 + torch (CUDA) + diffusers + sdnq + spandrel.",
+   "license": "BSD/Apache",
+   "license_url": "https://github.com/Disty0/sdnq",
+   "files": []
+  },
+  {
+   "id": "sdcpp-flux2-klein-4b",
+   "name": "FLUX.2 Klein 4B",
+   "backend": "sdcpp",
+   "kind": "redraw",
+   "mode": "edit",
+   "recommended": true,
+   "description": "Desenli ve karmaşık arka planı yeniden çizerek yazıyı siler. Her ekran kartında çalışır.",
+   "license": "Apache-2.0",
+   "license_url": "https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF",
+   "min_vram_gb": 6,
+   "min_ram_gb": 16,
+   "params": {
+    "steps": 4,
+    "cfg": 1.0,
+    "guidance": 1.0,
+    "sampler": "euler",
+    "offload": true,
+    "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork."
+   },
+   "files": [
+    {
+     "name": "flux-2-klein-4b-Q4_K_M.gguf",
+     "role": "diffusion",
+     "url": "https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF/resolve/main/flux-2-klein-4b-Q4_K_M.gguf",
+     "sha256": "0b25d143c8469b342bc5af3bce92b783bf6b0636d285f7b2f75e38af63af9a15",
+     "size": 2604311104,
+     "only": ""
+    },
+    {
+     "name": "Qwen3-4B-UD-Q4_K_XL.gguf",
+     "role": "llm",
+     "url": "https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-UD-Q4_K_XL.gguf",
+     "sha256": "f6e3fb6c2cdc869d16e66c719e94f2c02095d195967230e759a2d77fe814c71f",
+     "size": 2546341152,
+     "only": ""
+    },
+    {
+     "name": "flux2-vae.safetensors",
+     "role": "vae",
+     "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+     "sha256": "d64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5",
+     "size": 336213556,
+     "only": ""
+    }
+   ]
+  },
+  {
+   "id": "sdnq-flux2-klein-4b",
+   "name": "FLUX.2 Klein 4B (NVIDIA)",
+   "backend": "sdnq",
+   "kind": "redraw",
+   "mode": "edit",
+   "description": "Aynı model, NVIDIA kartlar için; ince ayrıntıda daha iyi olabilir.",
+   "license": "Apache-2.0",
+   "license_url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic",
+   "min_vram_gb": 6,
+   "min_ram_gb": 16,
+   "hf_repo": "Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic",
+   "params": {
+    "pipeline": "Flux2KleinPipeline",
+    "steps": 4,
+    "guidance": 1.0,
+    "max_side": 1024,
+    "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork."
+   },
+   "files": [
+    {
+     "name": "scheduler/scheduler_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/scheduler/scheduler_config.json",
+     "sha256": null,
+     "size": 486,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/text_encoder/config.json",
+     "sha256": null,
+     "size": 15367,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/generation_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/text_encoder/generation_config.json",
+     "sha256": null,
+     "size": 218,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/model.safetensors",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/text_encoder/model.safetensors",
+     "sha256": "bfdce60a5af0230b0ed6d960fb9aa96366d771337ed7d345319d837f673c3abb",
+     "size": 2824093272,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/quantization_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/text_encoder/quantization_config.json",
+     "sha256": null,
+     "size": 13146,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/added_tokens.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/added_tokens.json",
+     "sha256": null,
+     "size": 707,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/chat_template.jinja",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/chat_template.jinja",
+     "sha256": null,
+     "size": 4168,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/merges.txt",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/merges.txt",
+     "sha256": null,
+     "size": 1671853,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/special_tokens_map.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/special_tokens_map.json",
+     "sha256": null,
+     "size": 613,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/tokenizer.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/tokenizer.json",
+     "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+     "size": 11422654,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/tokenizer_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/tokenizer_config.json",
+     "sha256": null,
+     "size": 5404,
+     "only": ""
+    },
+    {
+     "name": "tokenizer/vocab.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/tokenizer/vocab.json",
+     "sha256": null,
+     "size": 2776833,
+     "only": ""
+    },
+    {
+     "name": "transformer/config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/transformer/config.json",
+     "sha256": null,
+     "size": 7328,
+     "only": ""
+    },
+    {
+     "name": "transformer/diffusion_pytorch_model.safetensors",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/transformer/diffusion_pytorch_model.safetensors",
+     "sha256": "75a66c7a56f1ca9de4b680f826dfb73e330a07840df0b472a9331c9d8c6f668c",
+     "size": 2467785416,
+     "only": ""
+    },
+    {
+     "name": "transformer/quantization_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/transformer/quantization_config.json",
+     "sha256": null,
+     "size": 6496,
+     "only": ""
+    },
+    {
+     "name": "vae/config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/vae/config.json",
+     "sha256": null,
+     "size": 925,
+     "only": ""
+    },
+    {
+     "name": "vae/diffusion_pytorch_model.safetensors",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/vae/diffusion_pytorch_model.safetensors",
+     "sha256": "ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04",
+     "size": 168120878,
+     "only": ""
+    },
+    {
+     "name": "model_index.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/model_index.json",
+     "sha256": null,
+     "size": 498,
+     "only": ""
+    }
+   ]
+  }
+ ]
+}
