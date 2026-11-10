@@ -30,6 +30,8 @@ class AppState {
 
   job = $state<JobEvt | null>(null);
   jobActive = $state(false);
+  /** Başlatılan işin düğme anahtarı (örn. 'clean:page'): ilgili düğme çalışıyor görünür. */
+  busy = $state<string | null>(null);
   pageStatus = $state<Record<number, { status: string; error: string; rev: number }>>({});
   tick = $state(0);
 
@@ -216,7 +218,13 @@ class AppState {
     else if (scope === 'errors') ids = this.pages.filter((p) => this.statusOf(p) === 'error').map((p) => p.id);
     else if (scope === 'selection' && this.selected.length) ids = this.pages.filter((p) => this.selected.includes(p.id)).map((p) => p.id);
     else ids = this.pages.map((p) => p.id);
-    try { await api.startJob({ page_ids: ids, mode, force: scope !== 'chapter', preset: this.presetFromOpts() }); } catch (e) { this.toast(String(e), 'err'); }
+    if (!ids.length || this.jobActive) return;
+    // düğmeye basılır basılmaz görünür durum: arka uç olayı beklemeden iş "çalışıyor" sayılır
+    this.busy = `${mode}:${scope}`;
+    this.jobActive = true;
+    this.job = { job_id: 0, mode, total: ids.length, fetched: 0, cleaned: 0, failed: 0, current: null, state: 'running', message: t('job.starting'), wait_secs: 0 };
+    try { await api.startJob({ page_ids: ids, mode, force: scope !== 'chapter', preset: this.presetFromOpts() }); }
+    catch (e) { this.jobActive = false; this.busy = null; this.job = null; this.toast(String(e), 'err'); }
   }
   async exportChapter(onlySelected = false) {
     if (this.exporting) return;
@@ -281,15 +289,23 @@ class AppState {
     api.hardware().then((h) => (this.hw = h));
     this.reloadModels();
     await listen<any>('safink', (ev) => {
-      const e = ev.payload;
+      let e = ev.payload;
       switch (e.type) {
         case 'page':
           this.pageStatus[e.page_id] = { status: e.status, error: e.error, rev: e.rev };
+          if (this.jobActive) {
+            // sayfa hazır olur olmaz liste (maske sayısı, küçük resim) ve açık sayfanın maske/sonuç görüntüsü tazelenir
+            this.reloadPages();
+            if (e.page_id === this.page?.id) this.tick++;
+          }
           break;
         case 'job':
+          // bitiş olayı sayaçları sıfırlı gelir; son bilinen sayaçları koru
+          if (this.job && this.job.job_id === e.job_id && e.state !== 'running' && e.state !== 'paused') e = { ...e, fetched: this.job.fetched, cleaned: this.job.cleaned, failed: this.job.failed };
           this.job = e;
           this.jobActive = e.state === 'running' || e.state === 'paused';
           if (!this.jobActive) {
+            this.busy = null;
             this.tick++;
             this.reloadPages();
             if (e.state === 'error') this.toast(e.message, 'err');

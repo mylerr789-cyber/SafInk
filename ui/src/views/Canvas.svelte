@@ -214,7 +214,11 @@
   const splitOn = $derived(app.compare && app.split && app.hasClean && app.layers.result.vis && !!app.page);
   function applySplit() {
     if (!resC || !cur) return;
-    if (!(resultShown() && app.split)) { resC.mask = null; overC.mask = null; return; }
+    if (!(resultShown() && app.split)) {
+      // maske kaldırılırken çizimleri de silinmeli: maskeler `world` içinde durur, silinmezse beyaz dikdörtgen olarak tüm sayfayı örter
+      resC.mask = null; overC.mask = null; maskR.clear(); maskO.clear();
+      return;
+    }
     const x = app.splitAt * cur.width;
     maskR.clear().rect(x, 0, cur.width - x, cur.height).fill(0xffffff);
     maskO.clear().rect(0, 0, x, cur.height).fill(0xffffff);

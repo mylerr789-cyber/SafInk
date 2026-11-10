@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Eye, EyeOff, RefreshCw, Download, ScanText } from 'lucide-svelte';
+  import { Eye, EyeOff, RefreshCw, Download, ScanText, Loader } from 'lucide-svelte';
   import { app } from '../lib/store.svelte';
   import { STATUS, fmtBytes, presetName } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
@@ -52,8 +52,8 @@
       <div class="flex flex-col gap-2.5">
         <Scrub bind:value={app.opts.confidence} min={0.05} max={0.95} step={0.05} decimals={2} label={t('insp.confidence')} onchange={custom} tip={t('insp.confidence_tip')} />
         <div class="grid grid-cols-2 gap-2.5">
-          <button class="btn" disabled={!app.page || app.jobActive} onclick={() => app.run('fetch', 'page')}><RefreshCw size={14} strokeWidth={2.25} /> {t('insp.refetch')}</button>
-          <button class="btn" disabled={!app.page || app.jobActive} onclick={() => app.run('fetch', 'chapter')}><ScanText size={14} strokeWidth={2.25} /> {t('insp.whole_chapter')}</button>
+          <button class="btn {app.busy === 'fetch:page' ? '!opacity-100 btn-ink' : ''}" disabled={!app.page || app.jobActive} aria-busy={app.busy === 'fetch:page'} onclick={() => app.run('fetch', 'page')}>{#if app.busy === 'fetch:page'}<Loader size={14} strokeWidth={2.25} class="animate-spin" />{:else}<RefreshCw size={14} strokeWidth={2.25} />{/if} {t('insp.refetch')}</button>
+          <button class="btn {app.busy === 'fetch:chapter' ? '!opacity-100 btn-ink' : ''}" disabled={!app.page || app.jobActive} aria-busy={app.busy === 'fetch:chapter'} onclick={() => app.run('fetch', 'chapter')}>{#if app.busy === 'fetch:chapter'}<Loader size={14} strokeWidth={2.25} class="animate-spin" />{:else}<ScanText size={14} strokeWidth={2.25} />{/if} {t('insp.whole_chapter')}</button>
         </div>
       </div>
     </Section>
@@ -104,10 +104,10 @@
   </div>
 
   <div class="shrink-0 border-t-[2.5px] border-ink bg-paper p-3 flex flex-col gap-2.5">
-    <button class="btn print !h-[54px] !justify-start !px-4 !gap-3" disabled={blocked} onclick={() => app.run('clean', 'page')}>
-      <span class="whiteout"></span><span class="disp text-[22px] leading-none font-normal">{t('insp.clean_page')}</span><span class="kbd ml-auto">CTRL ↵</span>
+    <button class="btn print !h-[54px] !justify-start !px-4 !gap-3 {app.busy === 'clean:page' ? '!opacity-100' : ''}" disabled={blocked} aria-busy={app.busy === 'clean:page'} onclick={() => app.run('clean', 'page')}>
+      {#if app.busy === 'clean:page'}<Loader size={26} strokeWidth={2.25} class="animate-spin shrink-0" />{:else}<span class="whiteout"></span>{/if}<span class="disp text-[22px] leading-none font-normal">{t('insp.clean_page')}</span><span class="kbd ml-auto">CTRL ↵</span>
     </button>
-    <button class="btn" disabled={blocked} onclick={() => app.run('clean', 'chapter')}>{t('insp.clean_chapter')} <span class="mono font-medium opacity-60">{t('insp.pages_n', { n: app.pages.length })}</span></button>
+    <button class="btn {app.busy === 'clean:chapter' ? '!opacity-100 btn-ink' : ''}" disabled={blocked} aria-busy={app.busy === 'clean:chapter'} onclick={() => app.run('clean', 'chapter')}>{#if app.busy === 'clean:chapter'}<Loader size={14} strokeWidth={2.25} class="animate-spin" />{/if}{t('insp.clean_chapter')} <span class="mono font-medium opacity-60">{t('insp.pages_n', { n: app.pages.length })}</span></button>
     {#if model && !model.installed}<div class="text-[12px] text-red text-center font-medium">{t('insp.model_missing')}</div>{/if}
   </div>
 </aside>

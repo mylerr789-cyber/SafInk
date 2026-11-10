@@ -83,6 +83,7 @@ export const tr = {
   'job.col_clean': 'temiz',
   'job.col_error': 'hata',
   'job.rate_wait': 'API sınırı — {n} sn bekleniyor',
+  'job.starting': 'başlatılıyor…',
   'job.resume': 'Sürdür',
   'job.pause': 'Duraklat',
   'job.stop': 'Durdur',

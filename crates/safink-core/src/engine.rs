@@ -378,6 +378,8 @@ impl Engine {
         let ctl = Arc::new(JobCtl { cancel: AtomicBool::new(false), paused: AtomicBool::new(false), id });
         *g = Some(ctl.clone());
         drop(g);
+        // düğmeye basılır basılmaz arayüz "çalışıyor" görsün: ilk olay model/API beklemeden hemen gider
+        self.emit(Event::Job { job_id: id, mode: spec.mode.clone(), total: spec.page_ids.len(), fetched: 0, cleaned: 0, failed: 0, current: None, state: "running".into(), message: crate::loc::pick("başlatılıyor…", "starting…"), wait_secs: 0.0 });
         let me = self.clone();
         tokio::spawn(async move {
             let res = me.clone().run_job(spec.clone(), ctl.clone()).await;
@@ -445,6 +447,7 @@ impl Engine {
                         break;
                     }
                     cur2.store(pid as u64, Ordering::Relaxed);
+                    *msg2.lock() = crate::loc::pick("sayfa temizleniyor", "cleaning page");
                     mk2("running");
                     let mut create_err: Option<anyhow::Error> = None;
                     let r = me.clean_page(
@@ -475,7 +478,8 @@ impl Engine {
                         &params2,
                         &ctl2.cancel,
                         &|d, t| {
-                            *msg2.lock() = format!("pencere {d}/{t}");
+                            *msg2.lock() = crate::t!("pencere {d}/{t}", "window {d}/{t}");
+                            mk2("running");
                         },
                     );
                     if let Some(e) = create_err {

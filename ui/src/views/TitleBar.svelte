@@ -70,6 +70,13 @@
   const doneN = $derived(j ? (j.mode === 'clean' ? j.cleaned : j.fetched) : 0);
   const frac = $derived(j && j.total ? Math.min(1, (doneN + j.failed) / j.total) : 0);
   const pad = (n: number) => String(n).padStart(2, '0');
+  // iş durumunun ikinci satırı: işlenen sayfa + aşama (API'ye gönderiliyor / sınır bekleniyor / model yükleniyor / pencere d/t)
+  const phase = $derived.by(() => {
+    if (!j) return '';
+    const pi = j.current != null ? app.pages.findIndex((p) => p.id === j.current) : -1;
+    const base = j.state === 'paused' ? t('job.paused') : j.message || (j.mode === 'clean' ? t('job.cleaning') : t('job.fetching'));
+    return (pi >= 0 ? `P.${pad(pi + 1)} · ` : '') + base;
+  });
 </script>
 
 <svelte:window onpointerdown={(e) => { if (!(e.target as HTMLElement).closest('[data-keep]')) { app.menu = null; jobsOpen = false; } }} />
@@ -120,11 +127,13 @@
   </div>
 
   <div class="relative flex border-l-[2.5px] border-ink" data-keep>
-    <button class="w-[260px] flex items-center gap-2.5 px-4 hover:bg-desk" onclick={() => (jobsOpen = !jobsOpen)}>
+    <button class="w-[300px] flex items-center gap-2.5 px-4 hover:bg-desk" onclick={() => (jobsOpen = !jobsOpen)}>
       {#if app.jobActive && j}
-        <span class="mono font-semibold">{doneN}/{j.total}</span>
-        <span class="flex-1 h-[11px] border-[1.5px] border-ink bg-sheet relative"><span class="tone absolute inset-y-0 left-0 transition-[width] duration-300" style="width:{frac * 100}%"></span></span>
-        <span class="font-medium">{j.state === 'paused' ? t('job.paused') : j.mode === 'clean' ? t('job.cleaning') : t('job.fetching')}</span>
+        <span class="mono font-semibold text-[15px] shrink-0">{doneN}/{j.total}</span>
+        <span class="flex-1 min-w-0 flex flex-col gap-1">
+          <span class="h-[11px] border-[1.5px] border-ink bg-sheet relative overflow-hidden"><span class="tone absolute inset-y-0 left-0 transition-[width] duration-300 {j.state === 'paused' ? '' : 'animate-pulse'}" style="width:{Math.max(frac * 100, 4)}%"></span></span>
+          <span class="mono text-[11px] leading-none truncate text-left {j.wait_secs > 0 ? 'text-red' : ''}">{phase}</span>
+        </span>
       {:else if j && j.state === 'error'}
         <span class="tag tag-red">{t('toast.err')}</span><span class="truncate text-[12px]">{j.message}</span>
       {:else if j && j.state === 'done'}

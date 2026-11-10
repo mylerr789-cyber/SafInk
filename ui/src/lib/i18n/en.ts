@@ -85,6 +85,7 @@ export const en: Record<Key, string> & Record<`${string}.one`, string> = {
   'job.col_clean': 'clean',
   'job.col_error': 'failed',
   'job.rate_wait': 'API limit — waiting {n} s',
+  'job.starting': 'starting…',
   'job.resume': 'Resume',
   'job.pause': 'Pause',
   'job.stop': 'Stop',
