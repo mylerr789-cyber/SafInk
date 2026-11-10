@@ -71,16 +71,16 @@ impl DeviceAuth {
             .json(&serde_json::json!({ "install_id": id }))
             .send()
             .await
-            .map_err(|e| anyhow!("sunucuya ulaşılamadı: {}", e.without_url()))?;
+            .map_err(|e| anyhow!(crate::t!("sunucuya ulaşılamadı: {}", "could not reach the server: {}", e.without_url())))?;
         let st = res.status();
         if !st.is_success() {
             if st.as_u16() == 429 {
-                bail!("Çok hızlı istek, birkaç dakika sonra tekrar deneyin");
+                bail!(crate::loc::pick("Çok hızlı istek, birkaç dakika sonra tekrar deneyin", "Too many requests, try again in a few minutes"));
             }
-            bail!("Kimlik doğrulama başarısız (HTTP {})", st.as_u16());
+            bail!(crate::t!("Kimlik doğrulama başarısız (HTTP {})", "Authentication failed (HTTP {})", st.as_u16()));
         }
-        let v: serde_json::Value = res.json().await.map_err(|_| anyhow!("Kimlik doğrulama yanıtı okunamadı"))?;
-        let tok = v["token"].as_str().ok_or_else(|| anyhow!("Kimlik doğrulama yanıtı geçersiz"))?.to_string();
+        let v: serde_json::Value = res.json().await.map_err(|_| anyhow!(crate::loc::pick("Kimlik doğrulama yanıtı okunamadı", "Could not read the authentication response")))?;
+        let tok = v["token"].as_str().ok_or_else(|| anyhow!(crate::loc::pick("Kimlik doğrulama yanıtı geçersiz", "Invalid authentication response")))?.to_string();
         let exp = v["expires_at"].as_u64().unwrap_or(now_secs() + 86400);
         keyring_set("device_token", &tok);
         keyring_set("device_exp", &exp.to_string());
@@ -173,14 +173,14 @@ impl ApiClient {
         let dev_key = std::env::var("SAFINK_API_KEY").ok().filter(|k| !k.is_empty());
         let mut refreshed = false;
         if bytes.len() > MAX_UPLOAD {
-            bail!("dosya 15 MB sınırını aşıyor ({} bayt)", bytes.len());
+            bail!(crate::t!("dosya 15 MB sınırını aşıyor ({} bayt)", "file exceeds the 15 MB limit ({} bytes)", bytes.len()));
         }
         let url = format!("{}/v1/mask?confidence={:.2}", self.base, confidence.clamp(0.05, 0.95));
         let max_attempts = 6;
         let mut backoff = 2.0f64;
         for attempt in 1..=max_attempts {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                bail!("iptal edildi");
+                bail!(crate::loc::pick("iptal edildi", "cancelled"));
             }
             self.throttle.acquire().await;
             let part = reqwest::multipart::Part::bytes(bytes.clone()).file_name(file_name.to_string()).mime_str(mime)?;
@@ -210,13 +210,13 @@ impl ApiClient {
                     let body = r.text().await.unwrap_or_default();
                     let body: String = body.chars().take(200).collect();
                     match st.as_u16() {
-                        429 if daily => bail!("Günlük ücretsiz sınıra ulaşıldı, yarın tekrar deneyin"),
+                        429 if daily => bail!(crate::loc::pick("Günlük ücretsiz sınıra ulaşıldı, yarın tekrar deneyin", "Daily free limit reached, try again tomorrow")),
                         429 | 503 | 502 | 504 => {
                             if st.as_u16() == 429 {
                                 self.throttle.drain();
-                                reason = "Çok hızlı istek, birkaç saniye bekleniyor".to_string();
+                                reason = crate::loc::pick("Çok hızlı istek, birkaç saniye bekleniyor", "Too many requests, waiting a few seconds");
                             } else {
-                                reason = "Sunucu meşgul, birkaç saniye bekleniyor".to_string();
+                                reason = crate::loc::pick("Sunucu meşgul, birkaç saniye bekleniyor", "Server busy, waiting a few seconds");
                             }
                             retry_after = ra;
                         }
@@ -226,19 +226,19 @@ impl ApiClient {
                             self.auth.token(&self.http, &self.base, true).await?;
                             continue;
                         }
-                        401 | 403 => bail!("Kimlik doğrulanamadı (HTTP {}); biraz sonra tekrar deneyin", st.as_u16()),
-                        413 => bail!("dosya çok büyük (HTTP 413)"),
-                        c => bail!("API hatası HTTP {c}: {body}"),
+                        401 | 403 => bail!(crate::t!("Kimlik doğrulanamadı (HTTP {}); biraz sonra tekrar deneyin", "Could not authenticate (HTTP {}); try again shortly", st.as_u16())),
+                        413 => bail!(crate::loc::pick("dosya çok büyük (HTTP 413)", "file too large (HTTP 413)")),
+                        c => bail!(crate::t!("API hatası HTTP {c}: {body}", "API error HTTP {c}: {body}")),
                     }
                 }
                 Err(e) if e.is_timeout() || e.is_connect() || e.is_request() => {
                     retry_after = None;
-                    reason = format!("Ağ hatası: {}", e.without_url());
+                    reason = crate::t!("Ağ hatası: {}", "Network error: {}", e.without_url());
                 }
                 Err(e) => return Err(e.without_url().into()),
             }
             if attempt == max_attempts {
-                bail!("{reason}; {max_attempts} deneme sonrası vazgeçildi");
+                bail!(crate::t!("{reason}; {max_attempts} deneme sonrası vazgeçildi", "{reason}; gave up after {max_attempts} attempts"));
             }
             let jitter = 1.0 + rand::random::<f64>() * 0.25;
             let wait = retry_after.unwrap_or(backoff * jitter).clamp(1.0, 120.0);
@@ -247,11 +247,11 @@ impl ApiClient {
             let end = Instant::now() + Duration::from_secs_f64(wait);
             while Instant::now() < end {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                    bail!("iptal edildi");
+                    bail!(crate::loc::pick("iptal edildi", "cancelled"));
                 }
                 tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
-        bail!("beklenmeyen durum")
+        bail!(crate::loc::pick("beklenmeyen durum", "unexpected state"))
     }
 }

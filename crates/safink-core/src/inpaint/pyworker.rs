@@ -86,10 +86,10 @@ fn run_logged(cmd: &mut Command, log: &(dyn Fn(&str) + Send + Sync), cancel: &At
     });
     let st = child.wait()?;
     if cancel.load(Ordering::Relaxed) {
-        bail!("iptal edildi");
+        bail!(crate::loc::pick("iptal edildi", "cancelled"));
     }
     if !st.success() {
-        bail!("komut başarısız: {st}");
+        bail!(crate::t!("komut başarısız: {st}", "command failed: {st}"));
     }
     Ok(())
 }
@@ -138,7 +138,7 @@ impl PyWorker {
     /// `script_name` workdir'e `source` içeriğiyle yazılır ve `python -I -u` ile başlatılır.
     pub fn spawn(paths: &AppPaths, sub: &str, script_name: &str, source: &str) -> Result<Self> {
         if !env_ready(paths) {
-            bail!("çalışma ortamı kurulu değil; modeli yeniden indirin");
+            bail!(crate::loc::pick("çalışma ortamı kurulu değil; modeli yeniden indirin", "runtime is not installed; download the model again"));
         }
         let workdir = paths.work().join(sub);
         std::fs::create_dir_all(&workdir)?;
@@ -159,7 +159,7 @@ impl PyWorker {
         loop {
             line.clear();
             if self.stdout.read_line(&mut line)? == 0 {
-                bail!("python worker beklenmedik şekilde kapandı (work/*/worker.log'a bakın)");
+                bail!(crate::loc::pick("python worker beklenmedik şekilde kapandı (work/*/worker.log'a bakın)", "the python worker exited unexpectedly (see work/*/worker.log)"));
             }
             if line.starts_with('{') {
                 return Ok(serde_json::from_str(line.trim())?);

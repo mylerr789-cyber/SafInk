@@ -4,6 +4,7 @@
   import { api, type Page } from '../lib/api';
   import { tile as fetchTile } from '../lib/host';
   import { app } from '../lib/store.svelte';
+  import { t as i18 } from '../lib/i18n/index.svelte';
 
   const TILE = 1024;
   const MAXUNDO = 40;
@@ -14,6 +15,7 @@
     canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; img: ImageData; tex: Texture; over: Sprite;
     base: Sprite | null; baseKey: string; baseLoading: boolean;
     res: Sprite | null; resKey: string; resLoading: boolean;
+    dil: Sprite | null; dilKey: string; dilCv: HTMLCanvasElement | null; dilTex: Texture | null;
   }
 
   let host: HTMLDivElement;
@@ -47,8 +49,8 @@
     return x.getImageData(0, 0, w, h).data;
   }
   function clearTiles() {
-    for (const t of tiles.values()) { t.over.destroy(); t.tex.destroy(true); t.base?.destroy({ texture: true }); t.res?.destroy({ texture: true }); }
-    tiles.clear();
+    for (const t of tiles.values()) { t.over.destroy(); t.tex.destroy(true); t.base?.destroy({ texture: true }); t.res?.destroy({ texture: true }); t.dil?.destroy({ texture: true }); }
+    tiles.clear(); dilShown = false;
     checker?.destroy(); checker = null;
     frame?.clear();
   }
@@ -85,7 +87,7 @@
       const img = ctx.createImageData(w, h);
       const tex = Texture.from(canvas);
       const over = new Sprite(tex); over.position.set(tx * TILE, ty * TILE); overC.addChild(over);
-      tiles.set(`${tx},${ty}`, { key: `${tx},${ty}`, tx, ty, w, h, api: null, edit: new Uint8Array(TILE * TILE), canvas, ctx, img, tex, over, base: null, baseKey: '', baseLoading: false, res: null, resKey: '', resLoading: false });
+      tiles.set(`${tx},${ty}`, { key: `${tx},${ty}`, tx, ty, w, h, api: null, edit: new Uint8Array(TILE * TILE), canvas, ctx, img, tex, over, base: null, baseKey: '', baseLoading: false, res: null, resKey: '', resLoading: false, dil: null, dilKey: '', dilCv: null, dilTex: null });
     }
     fit(p.height / p.width > 1.8 ? 'width' : 'page');
     await loadMasks(p, my);
@@ -122,6 +124,7 @@
       redraw(t);
     }));
     app.hasApiMask = any;
+    maskVer++; scheduleDil();
   }
 
   function redraw(t: T, r?: [number, number, number, number]) {
@@ -162,6 +165,7 @@
 
   function updateVisible() {
     if (!px || !cur) return;
+    scheduleDil();
     const s = world.scale.x, W = host.clientWidth, H = host.clientHeight;
     const x0 = -world.x / s, y0 = -world.y / s, x1 = x0 + W / s, y1 = y0 + H / s;
     const [a, b, c, d] = [Math.floor(x0 / TILE), Math.floor(y0 / TILE), Math.floor(x1 / TILE), Math.floor(y1 / TILE)];
@@ -204,6 +208,7 @@
     applySplit();
     for (const t of tiles.values()) redraw(t);
     scheduleVisible();
+    scheduleDil();
   }
   // önce | sonra: sonuç çizginin sağında, maske/orijinal solunda
   const splitOn = $derived(app.compare && app.split && app.hasClean && app.layers.result.vis && !!app.page);
@@ -280,7 +285,7 @@
             t.edit[y * TILE + x] = value;
           }
         }
-        if (changed) { dirty.add(t.key); redraw(t, [lx0, ly0, lx1, ly1]); }
+        if (changed) { dirty.add(t.key); redraw(t, [lx0, ly0, lx1, ly1]); maskVer++; scheduleDil(); }
       }
   }
   function strokeTo(ix: number, iy: number) {
@@ -325,10 +330,12 @@
       if (t.edit[i] !== value) { snapshot(t); t.edit[i] = value; touched.add(t); dirty.add(t.key); }
     }
     for (const t of touched) redraw(t);
+    maskVer++; scheduleDil();
     endStroke();
   }
   function applyEntry(m: Map<string, Uint8Array>) {
     for (const [k, v] of m) { const t = tiles.get(k); if (!t) continue; t.edit.set(v); dirty.add(k); redraw(t); }
+    maskVer++; scheduleDil();
     scheduleSave();
   }
   function doUndo() { const e = undo.pop(); if (!e) return; applyEntry(e.before); redo.push(e); app.canUndo = undo.length > 0; app.canRedo = true; }
@@ -348,9 +355,96 @@
     }
     const body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0;
     for (const p of parts) { body.set(p, o); o += p.length; }
-    try { await api.saveEdit(pid, body); } catch (e) { keys.forEach((k) => dirty.add(k)); app.toast('Düzenleme kaydedilemedi: ' + e, 'err'); }
+    try { await api.saveEdit(pid, body); } catch (e) { keys.forEach((k) => dirty.add(k)); app.toast(i18('canvas.save_failed', { err: String(e) }), 'err'); }
     app.saving = false;
   }
+
+
+  // ---------- genişletme (dilation) önizlemesi ----------
+  // Denetçideki "Genişlet" üstündeyken ya da değişirken, son maskenin (API ∪ mavi − silinen) genişletilmiş dış çizgisi çizilir.
+  // Arka uçtaki gibi disk yapı elemanı, yalnızca kenar piksellerine basılır; yalnızca görünen karolar, kısa gecikmeyle (debounce).
+  let dilC: Container;
+  let dilTimer: any = null;
+  let maskVer = 0;
+  let dilShown = false;
+  function scheduleDil() {
+    if (!app.dilOn && !dilShown) return;
+    clearTimeout(dilTimer);
+    dilTimer = setTimeout(updateDilation, 60);
+  }
+  function dropDil(t: T) {
+    if (t.dil) { t.dil.destroy({ texture: true }); t.dil = null; t.dilTex = null; t.dilCv = null; }
+    t.dilKey = '';
+  }
+  /** t karosunu r piksel genişletip çizim tuvaline yazar (komşu karolardan r+1 piksellik pay okunur). */
+  function dilateTile(t: T, r: number) {
+    const pad = r + 1, W = t.w + 2 * pad, H = t.h + 2 * pad;
+    const M = new Uint8Array(W * H);
+    const gx0 = t.tx * TILE - pad, gy0 = t.ty * TILE - pad;
+    let any = false;
+    for (let ty = Math.max(0, Math.floor(gy0 / TILE)); ty <= Math.min(ny - 1, Math.floor((gy0 + H - 1) / TILE)); ty++)
+      for (let tx = Math.max(0, Math.floor(gx0 / TILE)); tx <= Math.min(nx - 1, Math.floor((gx0 + W - 1) / TILE)); tx++) {
+        const n = tileAt(tx, ty); if (!n) continue;
+        const x0 = Math.max(gx0, tx * TILE), x1 = Math.min(gx0 + W, tx * TILE + n.w), y0 = Math.max(gy0, ty * TILE), y1 = Math.min(gy0 + H, ty * TILE + n.h);
+        for (let y = y0; y < y1; y++) {
+          const ro = (y - ty * TILE) * TILE - tx * TILE, mo = (y - gy0) * W - gx0;
+          for (let x = x0; x < x1; x++) {
+            const e = n.edit[ro + x], v = e === 1 ? 1 : e === 2 ? 0 : n.api ? n.api[ro + x] : 0;
+            if (v) { M[mo + x] = 1; any = true; }
+          }
+        }
+      }
+    if (!any) { dropDil(t); return; }
+    const D = M.slice();
+    const spans: number[] = [];
+    for (let dy = -r; dy <= r; dy++) spans.push(Math.floor(Math.sqrt(r * r - dy * dy + 0.25)));
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!M[i]) continue;
+      if (x > 0 && y > 0 && x < W - 1 && y < H - 1 && M[i - 1] && M[i + 1] && M[i - W] && M[i + W]) continue; // iç piksel
+      for (let dy = -r; dy <= r; dy++) {
+        const yy = y + dy; if (yy < 0 || yy >= H) continue;
+        const hx = spans[dy + r], a = Math.max(0, x - hx), b = Math.min(W - 1, x + hx);
+        D.fill(1, yy * W + a, yy * W + b + 1);
+      }
+    }
+    if (!t.dilCv) {
+      t.dilCv = document.createElement('canvas'); t.dilCv.width = t.w; t.dilCv.height = t.h;
+      t.dilTex = Texture.from(t.dilCv);
+      t.dil = new Sprite(t.dilTex); t.dil.position.set(t.tx * TILE, t.ty * TILE); dilC.addChild(t.dil);
+    }
+    const ctx = t.dilCv.getContext('2d')!, img = ctx.createImageData(t.w, t.h), o = img.data;
+    for (let y = 0; y < t.h; y++) for (let x = 0; x < t.w; x++) {
+      const g = (y + pad) * W + x + pad;
+      if (!D[g]) continue;
+      const k = (y * t.w + x) * 4;
+      const edge = !(D[g - 1] && D[g + 1] && D[g - W] && D[g + W]);
+      if (edge) { o[k] = 225; o[k + 1] = 52; o[k + 2] = 30; o[k + 3] = 255; }
+      else if (!M[g]) { o[k] = 225; o[k + 1] = 52; o[k + 2] = 30; o[k + 3] = ((x + y) % 6) < 3 ? 120 : 45; }
+    }
+    ctx.putImageData(img, 0, 0);
+    t.dilTex!.source.update();
+  }
+  function updateDilation() {
+    if (!px || !cur || !ready) return;
+    const on = app.dilOn && overC.visible;
+    if (!on) {
+      if (dilShown) { for (const t of tiles.values()) dropDil(t); dilShown = false; }
+      dilC.visible = false;
+      return;
+    }
+    const r = app.opts.dilation, s = world.scale.x, W = host.clientWidth, H = host.clientHeight;
+    const [a, b, c, d] = [Math.floor((-world.x / s) / TILE), Math.floor((-world.y / s) / TILE), Math.floor((-world.x / s + W / s) / TILE), Math.floor((-world.y / s + H / s) / TILE)];
+    const key = `${r}:${maskVer}`;
+    dilC.visible = true; dilShown = true;
+    for (const t of tiles.values()) {
+      if (t.tx < a || t.tx > c || t.ty < b || t.ty > d) { dropDil(t); continue; }
+      if (t.dilKey === key) continue;
+      dilateTile(t, r);
+      t.dilKey = key;
+    }
+  }
+  $effect(() => { app.dilOn; app.opts.dilation; app.layers.api.vis; app.layers.edit.vis; untrack(scheduleDil); });
 
   // ---------- olaylar ----------
   function local(e: { clientX: number; clientY: number }): [number, number] {
@@ -358,6 +452,18 @@
     return [e.clientX - r.left, e.clientY - r.top];
   }
   const toImg = (sx: number, sy: number): [number, number] => [(sx - world.x) / world.scale.x, (sy - world.y) / world.scale.x];
+
+
+  // fırça halkası: işaretçi tuvalden çıkınca (başka öğe, pencere dışı, odak kaybı), araç değişince ya da bir pencere açılınca kaybolur
+  let lastSx = -1, lastSy = -1, inside = false;
+  function hideRing() { app.cursor = null; inside = false; if (!panning && !stroke && !lasso) ring?.clear(); }
+  function onWindowBlur() { hideRing(); }
+  function onDocLeave() { hideRing(); }
+  $effect(() => {
+    app.tool;
+    untrack(() => { ring?.clear(); if (inside && lastSx >= 0) drawRing(lastSx, lastSy); });
+  });
+  $effect(() => { if (app.dialog || app.help || app.asking || app.menu) untrack(hideRing); });
 
   function drawRing(sx: number, sy: number) {
     ring.clear();
@@ -392,6 +498,7 @@
   }
   function onMove(e: PointerEvent) {
     const [sx, sy] = local(e);
+    lastSx = sx; lastSy = sy; inside = true;
     const [ix, iy] = toImg(sx, sy);
     app.cursor = cur ? { x: Math.round(ix), y: Math.round(iy) } : null;
     if (panning) { world.position.set(panning.wx + sx - panning.x, panning.wy + sy - panning.y); afterTransform(); drawRing(-100, -100); return; }
@@ -403,8 +510,12 @@
     panning = null;
     if (lasso) { const l = lasso; lasso = null; fillLasso(l, (app.lassoMode === 'add') !== e.altKey ? 1 : 2); }
     endStroke(); ring.clear();
+    // bırakıldığı yer hâlâ tuvalin içindeyse halka yerinde kalsın; dışındaysa kapalı
+    const [sx, sy] = local(e);
+    inside = sx >= 0 && sy >= 0 && sx <= host.clientWidth && sy <= host.clientHeight;
+    if (inside) drawRing(sx, sy); else app.cursor = null;
   }
-  function onLeave() { app.cursor = null; if (!panning && !stroke && !lasso) ring.clear(); }
+  function onLeave() { hideRing(); }
   function onWheel(e: WheelEvent) {
     e.preventDefault();
     const [sx, sy] = local(e);
@@ -432,20 +543,23 @@
     px = new Application();
     await px.init({ resizeTo: host, backgroundAlpha: 0, antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true, preference: 'webgl' });
     host.appendChild(px.canvas);
-    world = new Container(); baseC = new Container(); resC = new Container(); overC = new Container();
+    world = new Container(); baseC = new Container(); resC = new Container(); overC = new Container(); dilC = new Container(); dilC.visible = false;
     maskR = new Graphics(); maskO = new Graphics();
-    world.addChild(baseC, resC, overC, maskR, maskO);
+    world.addChild(baseC, resC, overC, dilC, maskR, maskO);
     frame = new Graphics();
     px.stage.addChild(frame, world);
     ring = new Graphics(); px.stage.addChild(ring);
     px.renderer.on('resize', () => { placeShadow(); scheduleVisible(); });
     window.addEventListener('keydown', onKeyDown); window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur); document.documentElement.addEventListener('mouseleave', onDocLeave);
     app.cv = { fit, zoomTo, undo: doUndo, redo: doRedo, flush, reloadAll: () => { app.tick++; } };
     setCursor();
     if (app.page) openPage(app.page);
   });
   onDestroy(() => {
     window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('blur', onWindowBlur); document.documentElement.removeEventListener('mouseleave', onDocLeave);
+    clearTimeout(dilTimer);
     token++; clearTiles(); app.cv = null;
     try { px?.destroy(true, { children: true, texture: true }); } catch {}
   });
@@ -461,6 +575,7 @@
   onpointerup={onUp}
   onpointercancel={onUp}
   onpointerleave={onLeave}
+  onlostpointercapture={onLeave}
   onwheel={onWheel}
   oncontextmenu={(e) => e.preventDefault()}
   style="touch-action:none"
@@ -474,9 +589,9 @@
       onpointermove={splitMove} onpointerup={() => (splitDrag = false)} onpointercancel={() => (splitDrag = false)}>
       <span class="mono text-[13px] font-bold leading-none">◂▸</span>
     </div>
-    <span class="absolute z-10 tag tag-ink pointer-events-none" style="left:{Math.max(8, divX - 62)}px; top:{divTop + 8}px">ÖNCE</span>
-    <span class="absolute z-10 tag bg-sheet pointer-events-none" style="left:{divX + 8}px; top:{divTop + 8}px">SONRA</span>
+    <span class="absolute z-10 tag tag-ink pointer-events-none" style="left:{Math.max(8, divX - 62)}px; top:{divTop + 8}px">{i18('canvas.before')}</span>
+    <span class="absolute z-10 tag bg-sheet pointer-events-none" style="left:{divX + 8}px; top:{divTop + 8}px">{i18('canvas.after')}</span>
   {/if}
-  {#if app.page && !ready}<div class="absolute inset-0 grid place-items-center pointer-events-none"><span class="mono font-semibold bg-sheet border-[1.5px] border-ink px-2 py-1">yükleniyor…</span></div>{/if}
-  {#if !app.page && app.project}<div class="absolute inset-0 grid place-items-center pointer-events-none"><span class="bg-sheet border-[1.5px] border-ink px-3 py-2 font-medium">Bu bölümde sayfa yok — soldaki + ile ekleyin.</span></div>{/if}
+  {#if app.page && !ready}<div class="absolute inset-0 grid place-items-center pointer-events-none"><span class="mono font-semibold bg-sheet border-[1.5px] border-ink px-2 py-1">{i18('canvas.loading')}</span></div>{/if}
+  {#if !app.page && app.project}<div class="absolute inset-0 grid place-items-center pointer-events-none"><span class="bg-sheet border-[1.5px] border-ink px-3 py-2 font-medium">{i18('canvas.empty')}</span></div>{/if}
 </div>

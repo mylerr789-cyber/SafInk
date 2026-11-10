@@ -6,6 +6,7 @@ pub mod download;
 pub mod engine;
 pub mod imgio;
 pub mod inpaint;
+pub mod loc;
 pub mod maskops;
 pub mod paths;
 pub mod pipeline;

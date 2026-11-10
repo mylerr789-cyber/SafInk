@@ -34,7 +34,7 @@ pub trait Inpainter: Send {
 
 pub fn create(paths: &AppPaths, spec: &ModelSpec, settings: &Settings) -> Result<Box<dyn Inpainter>> {
     if !spec.is_installed(paths) {
-        bail!("model kurulu değil: {} (Modeller bölümünden indirin)", spec.name);
+        bail!(crate::t!("model kurulu değil: {} (Modeller bölümünden indirin)", "model not installed: {} (download it in Models)", spec.name));
     }
     match spec.backend.as_str() {
         "lama" if crate::catalog::hardware().nvidia() => Ok(Box::new(torch_lama::TorchLama::new(paths, spec)?)),
@@ -72,7 +72,7 @@ pub fn pad_for(img: &RgbImage, params: &serde_json::Value) -> RgbImage {
 /// Model çıktısını dolgusuz özgün boyuta kırpar; beklenmeyen boyutta hata (ölçekleme yapılmaz).
 pub fn crop_to(out: RgbImage, w: u32, h: u32, padded: (u32, u32)) -> Result<RgbImage> {
     if out.dimensions() != padded {
-        bail!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", out.width(), out.height(), padded.0, padded.1);
+        bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), padded.0, padded.1));
     }
     Ok(image::imageops::crop_imm(&out, 0, 0, w, h).to_image())
 }

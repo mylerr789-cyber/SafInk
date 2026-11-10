@@ -42,7 +42,7 @@ impl SdnqInpainter {
         });
         let r = me.w.call(&load)?;
         if r["ok"] != true {
-            bail!("model yüklenemedi: {}", r["error"]);
+            bail!(crate::t!("model yüklenemedi: {}", "could not load model: {}", r["error"]));
         }
         Ok(me)
     }
@@ -53,7 +53,7 @@ impl Inpainter for SdnqInpainter {
     fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
-            bail!("iptal edildi");
+            bail!(crate::loc::pick("iptal edildi", "cancelled"));
         }
         self.counter += 1;
         let (w0, h0) = img.dimensions();
@@ -68,7 +68,7 @@ impl Inpainter for SdnqInpainter {
             "prompt": self.prep.prompt, "steps": self.steps, "guidance": self.guidance, "seed": 1,
         }))?;
         if r["ok"] != true {
-            bail!("yeniden çizim hatası: {}", r["error"]);
+            bail!(crate::t!("yeniden çizim hatası: {}", "redraw error: {}", r["error"]));
         }
         let out = image::open(&outp)?.to_rgb8();
         for p in [&inp, &outp] {

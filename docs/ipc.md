@@ -18,6 +18,8 @@ Tip tanımları: `ui/src/lib/api.ts` (Rust yapıları: `safink-core::{db,setting
 | `list_pages` | `chapterId` | `Page[]` |
 | `get_page` | `id` | `Page \| null` |
 | `delete_page` | `id` | – |
+| `reorder_pages` | `chapterId, pageIds: number[]` | – (`idx` değerlerini verilen sırayla 0..n yazar; listede olmayan sayfalar mevcut sırayla sona eklenir) |
+| `set_locale` | `locale: 'tr' \| 'en'` | – (arka uç iletilerinin dili; bkz. Dil) |
 | `import_folder` | `mangaId, path` | `number[]` (oluşan bölüm id'leri; klasörde görsel varsa tek bölüm, yoksa her alt klasör bir bölüm) |
 | `add_to_chapter` | `chapterId, paths: string[]` | `number` (eklenen sayfa) |
 | `quick_new` | `paths: string[]` | `chapterId` (önceki Quick Clean bölümünü siler; manga adı `__quick__`, listelerde görünmez) |
@@ -32,8 +34,9 @@ Tip tanımları: `ui/src/lib/api.ts` (Rust yapıları: `safink-core::{db,setting
 | `install_model` | `id` | – Tek tuş: gerekli çalışma ortamı (NVIDIA: sd.cpp CUDA12, diğer GPU: Vulkan, GPU yok: CPU; SDNQ ve NVIDIA'da LaMa için Python ortamı) otomatik önce kurulur, sonra model iner; tek ilerleme akışı `download{model_id=id}` |
 | `cancel_install` / `remove_model` | `id` | – |
 
-### Yeni (UI için henüz bağlanmadı) — yok
-Bu sürümde yeni komut eklenmedi.
+## Dil (tr / en)
+
+Arayüz metinleri `ui/src/lib/i18n/{tr,en}.ts` sözlüklerindedir (`t(key, params?)`; varsayılan işletim sistemi dili `tr` ile başlıyorsa Türkçe, değilse İngilizce; seçim `localStorage`'da). Arka uç iletileri (API sınırı/kimlik doğrulama, iş ve kurulum hataları, `Job.message`, `Download.phase`) **dil bilgisini UI'dan alır**: UI açılışta ve dil değişince `set_locale` çağırır; Rust `safink_core::loc` içinde süreç çapında saklar (ayar dosyasına yazılmaz) ve iletileri `t!("tr…", "en…", args)` / `loc::pick(tr, en)` ile seçili dilde üretir. Varsayılan Türkçe. Model açıklamaları `catalog.json`'da `description` (tr) ve `description_en` alanlarıdır. `pipeline.rs` içindeki sayfa-boyutu hataları henüz yalnızca Türkçedir.
 
 ## Olaylar
 

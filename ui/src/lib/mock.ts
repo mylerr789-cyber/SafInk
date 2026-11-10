@@ -10,7 +10,7 @@ const emit = (payload: any) => subs.forEach((f) => f({ payload }));
 
 const settings: any = {
   confidence: 0.25, dilation: 2, feather: 4, model_id: 'lama-manga',
-  export_dir: '', export_format: 'original', export_quality: 92, api_rate_per_min: 24, hf_token: '', low_vram: false,
+  export_dir: '', export_format: 'original', export_quality: 92, api_rate_per_min: 24, hf_token: '', low_vram: false, flat_fill: true,
   presets: [
     { id: 'fast', name: 'Hızlı – LaMa Manga', model_id: 'lama-manga', confidence: 0.25, dilation: 2, feather: 4 },
     { id: 'bold', name: 'Kalın yazı – geniş maske', model_id: 'lama-manga', confidence: 0.25, dilation: 6, feather: 6 },
@@ -40,9 +40,12 @@ const pages = (meta as any[]).map((m, i) => ({
   status: statuses[i], error: statuses[i] === 'error' ? 'API 503: sunucu geçici olarak kullanılamıyor' : '', mask_conf: statuses[i] === 'new' ? 0 : 0.25,
   detections: statuses[i] === 'new' ? 0 : m.det, rev: 1,
 }));
+let loc = 'tr'; // set_locale ile gelir; mock iletileri de seçili dilde üretir
+const L = (tr: string, en: string) => (loc === 'en' ? en : tr);
 const edits = new Map<string, Uint8Array>();
 const removed = new Set<number>(); // silinen sayfa id'leri (mock)
-const live = () => pages.filter((p) => !removed.has(p.id));
+let order: number[] = pages.map((p) => p.id); // bölüm 11 sayfa sırası (reorder_pages)
+const live = () => order.map((id) => pages[id - 1]).filter((p) => !removed.has(p.id));
 
 const imgCache = new Map<string, Promise<ImageBitmap | null>>();
 function bitmap(n: string) {
@@ -113,7 +116,7 @@ function simInstall(id: string) {
   if (timers.has(id)) throw 'bu model zaten indiriliyor';
   const grand = m.download_bytes; let done = 0;
   const step = grand / 40;
-  const phases = (m.backend === 'sdcpp' || m.backend === 'sdnq' || (m.backend === 'lama' && HW === 'nvidia')) ? ['Çalışma ortamı kuruluyor', 'Model indiriliyor'] : ['Model indiriliyor'];
+  const phases = (m.backend === 'sdcpp' || m.backend === 'sdnq' || (m.backend === 'lama' && HW === 'nvidia')) ? [L('Çalışma ortamı kuruluyor', 'Setting up runtime'), L('Model indiriliyor', 'Downloading model')] : [L('Model indiriliyor', 'Downloading model')];
   const t = window.setInterval(() => {
     done = Math.min(grand, done + step);
     const phase = phases.length === 2 && done < grand * 0.3 ? phases[0] : phases[phases.length - 1];
@@ -130,7 +133,7 @@ async function runJob(spec: any) {
   const id = ++job, total = spec.page_ids.length;
   let done = 0;
   for (const pid of spec.page_ids) {
-    emit({ type: 'job', job_id: id, mode: spec.mode, total, fetched: done, cleaned: spec.mode === 'clean' ? done : 0, failed: 0, current: pid, state: 'running', message: `Sayfa ${pid} işleniyor`, wait_secs: 0 });
+    emit({ type: 'job', job_id: id, mode: spec.mode, total, fetched: done, cleaned: spec.mode === 'clean' ? done : 0, failed: 0, current: pid, state: 'running', message: L(`Sayfa ${pid} işleniyor`, `Processing page ${pid}`), wait_secs: 0 });
     await new Promise((r) => setTimeout(r, 900));
     const p = pages[pid - 1];
     p.status = spec.mode === 'clean' ? 'cleaned' : 'mask_fetched'; p.rev++; p.error = '';
@@ -144,6 +147,8 @@ export async function invoke(cmd: string, a: any = {}, opts?: any): Promise<any>
   switch (cmd) {
     case 'get_settings': return structuredClone(settings);
     case 'save_settings': Object.assign(settings, a.settings); return;
+    case 'set_locale': loc = a.locale; return;
+    case 'reorder_pages': { const ids: number[] = a.pageIds; const rest = order.filter((id) => !ids.includes(id)); order = [...ids.filter((id) => order.includes(id)), ...rest]; return; }
     case 'list_manga': return structuredClone(mangas);
     case 'create_manga': { const f = mangas.find((m) => m.name === a.name); if (f) return f.id; const id = Math.max(...mangas.map((m) => m.id)) + 1; mangas.push({ id, name: a.name, chapters: 0 }); return id; }
     case 'rename_chapter': { const c = chapters.find((x) => x.id === a.id); if (c) c.name = a.name; return; }
@@ -168,7 +173,7 @@ export async function invoke(cmd: string, a: any = {}, opts?: any): Promise<any>
     case 'list_models': return models();
     case 'hardware': return hardware;
     case 'install_model': simInstall(a.id); return;
-    case 'cancel_install': { const t = timers.get(a.id); if (t) { clearInterval(t); timers.delete(a.id); emit({ type: 'download', model_id: a.id, file: 'iptal edildi', file_done: 0, file_total: 0, done: 0, total: 0, stage: 'error', phase: '' }); } return; }
+    case 'cancel_install': { const t = timers.get(a.id); if (t) { clearInterval(t); timers.delete(a.id); emit({ type: 'download', model_id: a.id, file: L('iptal edildi', 'cancelled'), file_done: 0, file_total: 0, done: 0, total: 0, stage: 'error', phase: '' }); } return; }
     case 'remove_model': installedSet.delete(a.id); return;
     case 'export_pages': { await new Promise((r) => setTimeout(r, 1200)); const ok = a.pageIds.filter((id: number) => pages[id - 1]?.status === 'cleaned').length; return { ok, skipped: a.pageIds.length - ok, dir: 'C:/out' }; }
     default: return;

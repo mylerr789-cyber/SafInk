@@ -1,14 +1,15 @@
 <script lang="ts">
   // Hanko mühür: temizlenen sayfaya basılır. Hata: dikdörtgen ret damgası.
+  import { t } from '../lib/i18n/index.svelte';
   let { kind = 'done', size = 50, text = '' }: { kind?: 'done' | 'error'; size?: number; text?: string } = $props();
 </script>
 
 {#if kind === 'done'}
   <span class="stamp grid place-items-center rounded-full border-[2.5px] border-red text-red disp bg-sheet/80"
-    style="--r:-12deg; width:{size}px; height:{size}px; font-size:{Math.round(size * 0.26)}px">{text || 'Temiz'}</span>
+    style="--r:-12deg; width:{size}px; height:{size}px; font-size:{Math.round(size * 0.26)}px">{text || t('stamp.clean')}</span>
 {:else}
   <span class="stamp inline-block border-[2.5px] border-red text-red disp bg-sheet/85 px-1.5 py-0.5"
-    style="--r:5deg; font-size:{Math.round(size * 0.26)}px">{text || 'Hata'}</span>
+    style="--r:5deg; font-size:{Math.round(size * 0.26)}px">{text || t('stamp.error')}</span>
 {/if}
 
 <style>

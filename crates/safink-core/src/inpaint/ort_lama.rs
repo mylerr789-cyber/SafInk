@@ -66,7 +66,7 @@ impl Inpainter for OrtInpainter {
 
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            bail!("iptal edildi");
+            bail!(crate::loc::pick("iptal edildi", "cancelled"));
         }
         assert_eq!(img.dimensions(), (S as u32, S as u32));
         let plane = S * S;

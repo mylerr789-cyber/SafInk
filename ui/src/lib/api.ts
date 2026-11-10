@@ -1,4 +1,6 @@
 import { invoke } from './host';
+import { t, i18n } from './i18n/index.svelte';
+import type { Key } from './i18n/tr';
 export { thumbUrl } from './host';
 
 export interface Manga { id: number; name: string; chapters: number }
@@ -15,7 +17,7 @@ export interface Settings {
 }
 export interface FileSpec { name: string; role: string; url: string; sha256: string | null; size: number }
 export interface Model {
-  id: string; name: string; backend: string; kind: string; mode: string; description: string; license: string; license_url: string;
+  id: string; name: string; backend: string; kind: string; mode: string; description: string; description_en?: string; license: string; license_url: string;
   min_vram_gb: number; min_ram_gb: number; notes: string; recommended: boolean; files: FileSpec[];
   installed: boolean; fit: string; total_bytes: number; downloaded_bytes: number; download_bytes: number; visible: boolean; variant: string;
 }
@@ -38,6 +40,9 @@ export const api = {
   listPages: (chapterId: number) => invoke<Page[]>('list_pages', { chapterId }),
   getPage: (id: number) => invoke<Page | null>('get_page', { id }),
   deletePage: (id: number) => invoke<void>('delete_page', { id }),
+  reorderPages: (chapterId: number, pageIds: number[]) => invoke<void>('reorder_pages', { chapterId, pageIds }),
+  /** Arayüz dili: arka uç iletileri bu dilde üretilir. */
+  setLocale: (locale: string) => invoke<void>('set_locale', { locale }),
   importFolder: (mangaId: number, path: string) => invoke<number[]>('import_folder', { mangaId, path }),
   addToChapter: (chapterId: number, paths: string[]) => invoke<number>('add_to_chapter', { chapterId, paths }),
   quickNew: (paths: string[]) => invoke<number>('quick_new', { paths }),
@@ -62,11 +67,20 @@ export const fmtBytes = (n: number) => {
   return (n / 1024).toFixed(0) + ' KB';
 };
 
-/** Sayfa durumu: etiket + müsvedde dilindeki işaret (tag sınıfı). */
-export const STATUS: Record<string, { label: string; tag: string }> = {
-  new: { label: 'Yeni', tag: '' },
-  mask_fetched: { label: 'Maskeli', tag: 'tag-red' },
-  mask_edited: { label: 'Düzenlendi', tag: 'tag-blue' },
-  cleaned: { label: 'Temiz', tag: 'tag-ink' },
-  error: { label: 'Hata', tag: 'tag-red' },
+/** Sayfa durumu: etiket anahtarı + müsvedde dilindeki işaret (tag sınıfı). */
+export const STATUS: Record<string, { key: Key; tag: string }> = {
+  new: { key: 'status.new', tag: '' },
+  mask_fetched: { key: 'status.mask_fetched', tag: 'tag-red' },
+  mask_edited: { key: 'status.mask_edited', tag: 'tag-blue' },
+  cleaned: { key: 'status.cleaned', tag: 'tag-ink' },
+  error: { key: 'status.error', tag: 'tag-red' },
+};
+
+/** Model açıklaması: İngilizce arayüzde `description_en`, yoksa katalogdaki Türkçe. */
+export const modelDesc = (m: Model) => (i18n.locale === 'en' && m.description_en) || m.description;
+/** Ön ayar adı: bilinen kimlikler çevrilir, kullanıcı ön ayarları olduğu gibi gösterilir. */
+export const presetName = (p: { id: string; name: string }) => {
+  const k = ('preset.' + p.id) as Key;
+  const s = t(k);
+  return s === k ? p.name : s;
 };

@@ -21,6 +21,9 @@ fn e2s<E: std::fmt::Display>(e: E) -> String { e.to_string() }
 fn get_settings(eng: Eng) -> Settings { eng.settings.read().clone() }
 #[tauri::command]
 fn save_settings(eng: Eng, settings: Settings) -> R<()> { eng.set_settings(settings).map_err(e2s) }
+/// Arayüz dili ("tr" | "en"): arka uç iletileri bu dilde üretilir (bkz. docs/ipc.md).
+#[tauri::command]
+fn set_locale(locale: String) { safink_core::loc::set(&locale) }
 
 // ---------- kÃ¼tÃ¼phane ----------
 #[tauri::command]
@@ -44,6 +47,8 @@ fn rename_chapter(eng: Eng, id: i64, name: String) -> R<()> { eng.db.rename_chap
 fn list_pages(eng: Eng, chapter_id: i64) -> R<Vec<Page>> { eng.db.pages(chapter_id).map_err(e2s) }
 #[tauri::command]
 fn get_page(eng: Eng, id: i64) -> R<Option<Page>> { eng.db.page(id).map_err(e2s) }
+#[tauri::command]
+fn reorder_pages(eng: Eng, chapter_id: i64, page_ids: Vec<i64>) -> R<()> { eng.db.reorder_pages(chapter_id, &page_ids).map_err(e2s) }
 #[tauri::command]
 fn delete_page(eng: Eng, id: i64) -> R<()> {
     eng.delete_page_files(id);
@@ -86,7 +91,7 @@ async fn export_pages(eng: Eng<'_>, page_ids: Vec<i64>, out_dir: Option<String>)
     let e = eng.inner().clone();
     tokio::task::spawn_blocking(move || {
         let s = e.settings.read().clone();
-        let dir = out_dir.filter(|d| !d.is_empty()).or(Some(s.export_dir.clone()).filter(|d| !d.is_empty())).ok_or_else(|| anyhow::anyhow!("Ã§Ä±ktÄ± klasÃ¶rÃ¼ seÃ§ilmedi"))?;
+        let dir = out_dir.filter(|d| !d.is_empty()).or(Some(s.export_dir.clone()).filter(|d| !d.is_empty())).ok_or_else(|| anyhow::anyhow!(safink_core::loc::pick("çıktı klasörü seçilmedi", "no output folder selected")))?;
         let (ok, skipped, d) = e.export(&page_ids, &PathBuf::from(dir), &s.export_format, s.export_quality)?;
         Ok::<_, anyhow::Error>(ExportResult { ok, skipped, dir: d.to_string_lossy().to_string() })
     })
@@ -101,9 +106,9 @@ fn reveal_path(path: String) { let _ = std::process::Command::new("explorer").ar
 /// Ham gÃ¶vde: [u32 tx][u32 ty][1024*1024 bayt] kayÄ±tlarÄ±. Sayfa id'si `x-page-id` baÅŸlÄ±ÄŸÄ±nda.
 #[tauri::command]
 fn save_edit(eng: Eng, req: Request) -> R<()> {
-    let InvokeBody::Raw(bytes) = req.body() else { return Err("ham gÃ¶vde bekleniyordu".into()) };
-    let pid: i64 = req.headers().get("x-page-id").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).ok_or("x-page-id eksik")?;
-    let page = eng.db.page(pid).map_err(e2s)?.ok_or("sayfa yok")?;
+    let InvokeBody::Raw(bytes) = req.body() else { return Err(safink_core::loc::pick("ham gövde bekleniyordu", "raw body expected")) };
+    let pid: i64 = req.headers().get("x-page-id").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).ok_or_else(|| safink_core::loc::pick("x-page-id eksik", "x-page-id missing"))?;
+    let page = eng.db.page(pid).map_err(e2s)?.ok_or_else(|| safink_core::loc::pick("sayfa yok", "page not found"))?;
     safink_core::tiles::save_edit_tiles(&eng.paths, &page, bytes).map_err(e2s)?;
     if page.status != "new" || eng.paths.mask_file(&page.sha256, page.mask_conf as f32).exists() {
         eng.db.set_status(pid, "mask_edited", "").map_err(e2s)?;
@@ -178,10 +183,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_settings, save_settings, list_manga, create_manga, delete_manga, list_chapters, delete_chapter,
-            rename_chapter, list_pages, get_page, delete_page, import_folder, add_to_chapter, quick_new, start_job, cancel_job, pause_job,
+            rename_chapter, list_pages, get_page, reorder_pages, set_locale, delete_page, import_folder, add_to_chapter, quick_new, start_job, cancel_job, pause_job,
             job_running, export_pages, reveal_path, save_edit, reset_edits, list_models, hardware, install_model, cancel_install, remove_model
         ])
         .run(tauri::generate_context!())
-        .expect("SafInk baÅŸlatÄ±lamadÄ±");
+        .expect("SafInk failed to start");
 }
 

@@ -144,6 +144,31 @@ impl Db {
         self.conn.lock().execute("UPDATE page SET mask_conf=?2,detections=?3,rev=rev+1 WHERE id=?1", params![id, conf, detections])?;
         Ok(())
     }
+    /// Bölümün sayfalarını verilen sırayla yeniden numaralar (`idx` 0..n). Listede olmayan sayfalar mevcut sırayla sona eklenir.
+    pub fn reorder_pages(&self, chapter_id: i64, order: &[i64]) -> Result<()> {
+        let c = self.conn.lock();
+        let tx = c.unchecked_transaction()?;
+        let mut ids: Vec<i64> = Vec::with_capacity(order.len());
+        {
+            let mut s = tx.prepare("SELECT id FROM page WHERE chapter_id=?1 ORDER BY idx")?;
+            let cur: Vec<i64> = s.query_map(params![chapter_id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            for id in order {
+                if cur.contains(id) && !ids.contains(id) {
+                    ids.push(*id);
+                }
+            }
+            for id in cur {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        for (i, id) in ids.iter().enumerate() {
+            tx.execute("UPDATE page SET idx=?3 WHERE id=?1 AND chapter_id=?2", params![id, chapter_id, i as i64])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
     pub fn delete_page(&self, id: i64) -> Result<()> {
         self.conn.lock().execute("DELETE FROM page WHERE id=?1", params![id])?;
         Ok(())

@@ -29,7 +29,7 @@ pub fn sha256_file(path: &Path, cancel: &AtomicBool) -> Result<String> {
     let mut buf = vec![0u8; 4 << 20];
     loop {
         if cancel.load(Ordering::Relaxed) {
-            bail!("iptal edildi");
+            bail!(crate::loc::pick("iptal edildi", "cancelled"));
         }
         let n = f.read(&mut buf)?;
         if n == 0 {
@@ -79,7 +79,7 @@ pub async fn download_file(
             // sunucu Range'i yok saydı: baştan
             have = 0;
         } else if !st.is_success() {
-            bail!("indirme hatası HTTP {} ({})", st.as_u16(), spec.name);
+            bail!(crate::t!("indirme hatası HTTP {} ({})", "download error HTTP {} ({})", st.as_u16(), spec.name));
         }
         let mut f = tokio::fs::OpenOptions::new().create(true).write(true).append(have > 0).truncate(have == 0).open(&part).await?;
         let mut done = have;
@@ -88,7 +88,7 @@ pub async fn download_file(
         while let Some(chunk) = stream.next().await {
             if cancel.load(Ordering::Relaxed) {
                 f.flush().await?;
-                bail!("iptal edildi");
+                bail!(crate::loc::pick("iptal edildi", "cancelled"));
             }
             let c = chunk?;
             f.write_all(&c).await?;
@@ -104,7 +104,7 @@ pub async fn download_file(
     }
     let len = std::fs::metadata(&part)?.len();
     if len != spec.size {
-        bail!("boyut uyuşmuyor: {} (beklenen {}, gelen {})", spec.name, spec.size, len);
+        bail!(crate::t!("boyut uyuşmuyor: {} (beklenen {}, gelen {})", "size mismatch: {} (expected {}, got {})", spec.name, spec.size, len));
     }
     if let Some(expected) = &spec.sha256 {
         on_stage("verifying");
@@ -114,7 +114,7 @@ pub async fn download_file(
         let got = tokio::task::spawn_blocking(move || sha256_file(&p2, &cancel_flag)).await??;
         if got != exp {
             let _ = std::fs::remove_file(&part);
-            bail!("SHA-256 uyuşmuyor ({}); bozuk indirme silindi, tekrar deneyin", spec.name);
+            bail!(crate::t!("SHA-256 uyuşmuyor ({}); bozuk indirme silindi, tekrar deneyin", "SHA-256 mismatch ({}); corrupt download removed, try again", spec.name));
         }
     }
     std::fs::rename(&part, dest).with_context(|| format!("rename {}", dest.display()))?;

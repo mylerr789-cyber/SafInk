@@ -50,13 +50,13 @@ PAGE = {"max_width": 2048, "input_mode": "green", "prompt": EDIT_PROMPT,
 
 # ---- LaMa: NVIDIA'da PyTorch (GPU), diğerlerinde ONNX (CPU). Makine yalnızca kendi dosyasını indirir ("only"). ----
 add(id="lama-manga", name="LaMa Manga", backend="lama", kind="inpaint", adapter="lama01", recommended=True,
-    description="Hızlı, düz ve sade arka planlar için. Çoğu sayfa için en iyi başlangıç.",
+    description="Hızlı, düz ve sade arka planlar için. Çoğu sayfa için en iyi başlangıç.", description_en="Fast, for plain and simple backgrounds. The best starting point for most pages.",
     license="MIT", license_url="https://huggingface.co/mayocream/lama-manga", min_vram_gb=1, min_ram_gb=4,
     params={"torch": "spandrel_prefixed"},
     files=[hf_file("mayocream/lama-manga-onnx", "lama-manga.onnx", "model", only="cpu"),
            hf_file("mayocream/lama-manga", "lama-manga.safetensors", "torch", only="cuda")])
 add(id="lama-big", name="LaMa Genel", backend="lama", kind="inpaint", adapter="lama255",
-    description="Karışık ve dokulu arka planlar için genel amaçlı sürüm.",
+    description="Karışık ve dokulu arka planlar için genel amaçlı sürüm.", description_en="General-purpose version for busy, textured backgrounds.",
     license="Apache-2.0", license_url="https://github.com/advimman/lama", min_vram_gb=1, min_ram_gb=4,
     params={"torch": "auto"},
     files=[hf_file("Carve/LaMa-ONNX", "lama_fp32.onnx", "model", only="cpu"),
@@ -78,21 +78,21 @@ def asset(sub):
 
 
 add(id="tool-sdcpp-vulkan", name=f"sd.cpp {tag} Vulkan", backend="tool", kind="runtime", variant="vulkan",
-    description="NVIDIA dışı ekran kartları (AMD/Intel).", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
+    description="NVIDIA dışı ekran kartları (AMD/Intel).", description_en="Non-NVIDIA graphics cards (AMD/Intel).", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
     files=[asset("bin-win-vulkan-x64")])
 add(id="tool-sdcpp-cuda12", name=f"sd.cpp {tag} CUDA 12", backend="tool", kind="runtime", variant="cuda12",
-    description="NVIDIA ekran kartları.", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
+    description="NVIDIA ekran kartları.", description_en="NVIDIA graphics cards.", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
     files=[asset("bin-win-cuda12-x64"), asset("cudart-sd-bin-win-cu12")])
 add(id="tool-sdcpp-cpu", name=f"sd.cpp {tag} CPU", backend="tool", kind="runtime", variant="cpu",
-    description="Ekran kartı yok.", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
+    description="Ekran kartı yok.", description_en="No graphics card.", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
     files=[asset("bin-win-cpu-x64")])
 add(id="tool-sdnq-env", name="Python ortamı", backend="tool", kind="runtime", variant="python",
-    description="uv ile yönetilen Python 3.12 + torch (CUDA) + diffusers + sdnq + spandrel.", license="BSD/Apache", license_url="https://github.com/Disty0/sdnq",
+    description="uv ile yönetilen Python 3.12 + torch (CUDA) + diffusers + sdnq + spandrel.", description_en="Python 3.12 managed by uv + torch (CUDA) + diffusers + sdnq + spandrel.", license="BSD/Apache", license_url="https://github.com/Disty0/sdnq",
     files=[])
 
 # ---- Yeniden çizim (MangaTranslator'ın Klein 4B ayarları: 4 adım, guidance 1.0, euler) ----
 add(id="sdcpp-flux2-klein-4b", name="FLUX.2 Klein 4B", backend="sdcpp", kind="redraw", mode="edit", recommended=True,
-    description="Desenli ve karmaşık arka planı yeniden çizerek yazıyı siler. Her ekran kartında çalışır.",
+    description="Desenli ve karmaşık arka planı yeniden çizerek yazıyı siler. Her ekran kartında çalışır.", description_en="Erases the text by redrawing patterned and complex backgrounds. Works on any graphics card.",
     license="Apache-2.0", license_url="https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF", min_vram_gb=6, min_ram_gb=16,
     params={"steps": 4, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "quant": "GGUF Q4_K_M", **PAGE},
     files=[hf_file("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_K_M.gguf", "diffusion"),
@@ -100,7 +100,7 @@ add(id="sdcpp-flux2-klein-4b", name="FLUX.2 Klein 4B", backend="sdcpp", kind="re
            hf_file("Comfy-Org/flux2-dev", "split_files/vae/flux2-vae.safetensors", "vae")])
 repo = "Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic"
 add(id="sdnq-flux2-klein-4b", name="FLUX.2 Klein 4B (NVIDIA)", backend="sdnq", kind="redraw", mode="edit",
-    description="Aynı model, NVIDIA kartlar için; ince ayrıntıda daha iyi olabilir.",
+    description="Aynı model, NVIDIA kartlar için; ince ayrıntıda daha iyi olabilir.", description_en="Same model, for NVIDIA cards; may be better on fine detail.",
     license="Apache-2.0", license_url="https://huggingface.co/" + repo, min_vram_gb=6, min_ram_gb=16, hf_repo=repo,
     params={"pipeline": "Flux2KleinPipeline", "steps": 4, "guidance": 1.0, "quant": "4-bit dinamik", **PAGE},
     files=hf_repo_all(repo))
@@ -109,7 +109,7 @@ add(id="sdnq-flux2-klein-4b", name="FLUX.2 Klein 4B (NVIDIA)", backend="sdnq", k
 # 8 adım sabit sigma çizelgesi ("--sigmas qwen-image-2.1-turbo"), cfg 1, euler; metin kodlayıcı Qwen3-VL-8B (+ mmproj), 32'nin katı çözünürlük. ----
 QWEN = {"steps": 8, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "sigmas": "qwen-image-2.1-turbo", "multiple": 32, **PAGE}
 add(id="sdcpp-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo", backend="sdcpp", kind="redraw", mode="edit",
-    description="Qwen-Image 2.1 Turbo ile yazı yerini çevresine uygun yeniden çizer; Klein'dan ağır ve yavaş.",
+    description="Qwen-Image 2.1 Turbo ile yazı yerini çevresine uygun yeniden çizer; Klein'dan ağır ve yavaş.", description_en="Redraws the text area to match its surroundings with Qwen-Image 2.1 Turbo; heavier and slower than Klein.",
     license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
     min_vram_gb=12, min_ram_gb=24, notes="Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~50 sn, en çok ~14 GB VRAM.",
     params={**QWEN, "quant": "GGUF Q4_K_M"},
@@ -119,7 +119,7 @@ add(id="sdcpp-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo", backend="sdcpp
            hf_file("unsloth/Qwen-Image-2.1-FP8", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae")])
 repo = "SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256"  # MangaTranslator'ın SDNQ deposu (texture-fix VAE dahil)
 add(id="sdnq-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo (NVIDIA)", backend="sdnq", kind="redraw", mode="edit",
-    description="Aynı model, NVIDIA kartlar için 4-bit SDNQ sürümü; daha az VRAM kullanır.",
+    description="Aynı model, NVIDIA kartlar için 4-bit SDNQ sürümü; daha az VRAM kullanır.", description_en="Same model, 4-bit SDNQ build for NVIDIA cards; uses less VRAM.",
     license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
     min_vram_gb=10, min_ram_gb=24, hf_repo=repo, notes="Qwen3-VL-8B metin kodlayıcı dahil; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~70 sn, en çok ~10,5 GB VRAM.",
     params={"pipeline": "QwenImage21Pipeline", "steps": 8, "multiple": 32, "quant": "4-bit dinamik · Hadamard", **PAGE},

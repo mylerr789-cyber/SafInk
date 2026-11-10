@@ -2,6 +2,7 @@
   import { X, FolderOpen, Images, Plus, Trash2, Settings, Boxes, FolderInput, ArrowRight, Pencil, Download } from 'lucide-svelte';
   import { api, thumbUrl, type Manga, type Chapter } from '../lib/api';
   import { app } from '../lib/store.svelte';
+  import { t } from '../lib/i18n/index.svelte';
   import { importChapterFolder, quickFromPicker } from '../lib/actions';
   import Logo from '../ui/Logo.svelte';
   import Stamp from '../ui/Stamp.svelte';
@@ -14,6 +15,21 @@
   let adding = $state(false);
   let renId = $state<number | null>(null);
   let renDraft = $state('');
+  // kaldığın yerden devam: son açılan bölüm/sayfa hâlâ varsa en üstte gösterilir
+  let resume = $state<{ pageId: number; index: number; total: number } | null>(null);
+  async function loadResume() {
+    const l = app.last;
+    resume = null;
+    if (!l) return;
+    try {
+      const pages = await api.listPages(l.chapterId);
+      if (!pages.length) { app.forgetLast(); return; }
+      const i = pages.findIndex((p) => p.id === l.pageId);
+      const idx = i >= 0 ? i : Math.min(l.index, pages.length - 1);
+      resume = { pageId: pages[idx].id, index: idx, total: pages.length };
+    } catch { resume = null; }
+  }
+  $effect(() => { app.last; app.tick; loadResume(); });
   const noModel = $derived(app.models.length > 0 && !app.models.some((m) => m.installed));
   async function commitRename(c: Card) {
     if (renId !== c.ch.id) return;
@@ -32,8 +48,9 @@
       const m = mangas.find((x) => x.id === sel);
       if (m) list = (await api.listChapters(m.id)).map((c) => ({ ch: c, manga: m.name }));
     }
-    cards = list.map((x) => ({ ...x, thumb: null }));
-    cards.forEach((c, i) => api.listPages(c.ch.id).then((p) => { if (cards[i]) cards[i].thumb = p[0]?.id ?? null; }));
+    const next: Card[] = list.map((x) => ({ ...x, thumb: null }));
+    cards = next;
+    next.forEach((c, i) => api.listPages(c.ch.id).then((p) => { if (cards[i]) cards[i].thumb = p[0]?.id ?? null; }));
   }
   $effect(() => { app.tick; loadMangas(); });
   $effect(() => { sel; mangas; loadCards(); });
@@ -45,12 +62,12 @@
   }
   async function delChapter(c: Card, e: Event) {
     e.stopPropagation();
-    if (!(await app.ask(`"${c.ch.name}" kütüphaneden kaldırılsın? Orijinal dosyalara dokunulmaz.`))) return;
+    if (!(await app.ask(t('home.ask_remove_chapter', { name: c.ch.name })))) return;
     if (app.project?.chapterId === c.ch.id) { app.project = null; app.pages = []; }
     await api.deleteChapter(c.ch.id); await loadMangas(); await loadCards();
   }
   async function delManga(m: Manga) {
-    if (!(await app.ask(`"${m.name}" ve tüm bölümleri kütüphaneden kaldırılsın? Orijinal dosyalara dokunulmaz.`))) return;
+    if (!(await app.ask(t('home.ask_remove_manga', { name: m.name })))) return;
     await api.deleteManga(m.id); if (sel === m.id) sel = 'recent'; await loadMangas();
   }
   const curManga = $derived(typeof sel === 'number' ? mangas.find((m) => m.id === sel) : undefined);
@@ -65,18 +82,18 @@
   <aside class="koma flex flex-col overflow-hidden">
     <div class="h-[64px] shrink-0 bg-ink text-paper flex items-center px-4" data-tauri-drag-region><Logo size={30} /></div>
     <button class="h-[44px] shrink-0 px-3.5 flex items-center gap-2 border-y-[2.5px] border-ink text-left {sel === 'recent' ? 'bg-ink text-paper' : 'hover:bg-desk'}" onclick={() => (sel = 'recent')}>
-      <span class="disp text-[18px] leading-none">Masa</span><span class="mono text-[11px] opacity-60 ml-auto">son bölümler</span>
+      <span class="disp text-[18px] leading-none">{t('home.desk')}</span><span class="mono text-[11px] opacity-60 ml-auto">{t('home.desk_sub')}</span>
     </button>
     <div class="h-[40px] shrink-0 px-3.5 flex items-center tone-light border-b-[1.5px] border-ink">
-      <span class="disp text-[17px] leading-none bg-sheet px-1.5 py-1 -ml-1.5">Raf</span>
+      <span class="disp text-[17px] leading-none bg-sheet px-1.5 py-1 -ml-1.5">{t('home.shelf')}</span>
       <span class="mono text-[11px] bg-sheet px-1 ml-2">{pad(mangas.length)}</span>
       <div class="flex-1"></div>
-      <button class="btn btn-sm btn-icon !h-6 !w-6" data-tip="Yeni manga" aria-label="Yeni manga" onclick={() => (adding = !adding)}><Plus size={14} strokeWidth={2.5} /></button>
+      <button class="btn btn-sm btn-icon !h-6 !w-6" data-tip={t('home.new_manga')} aria-label={t('home.new_manga')} onclick={() => (adding = !adding)}><Plus size={14} strokeWidth={2.5} /></button>
     </div>
     {#if adding}
       <div class="p-2.5 border-b-[1.5px] border-ink slidein">
         <!-- svelte-ignore a11y_autofocus -->
-        <input class="field" placeholder="Manga adı, Enter" bind:value={newName} autofocus onkeydown={(e) => { if (e.key === 'Enter') addManga(); if (e.key === 'Escape') { adding = false; e.stopPropagation(); } }} />
+        <input class="field" placeholder={t('home.manga_name_ph')} bind:value={newName} autofocus onkeydown={(e) => { if (e.key === 'Enter') addManga(); if (e.key === 'Escape') { adding = false; e.stopPropagation(); } }} />
       </div>
     {/if}
     <div class="flex-1 min-h-0 overflow-y-auto">
@@ -84,16 +101,16 @@
         <div class="group flex items-stretch border-b-[1.5px] border-ink/15 {sel === m.id ? 'bg-ink text-paper' : 'hover:bg-desk'}">
           <button class="flex-1 min-w-0 py-2.5 pl-3.5 pr-2 text-left" onclick={() => (sel = m.id)}>
             <div class="font-semibold truncate leading-tight">{m.name}</div>
-            <div class="mono text-[10.5px] opacity-60 mt-0.5">{pad(m.chapters)} bölüm</div>
+            <div class="mono text-[10.5px] opacity-60 mt-0.5">{t('home.chapters_n', { n: pad(m.chapters) })}</div>
           </button>
-          <button class="hidden group-hover:grid place-items-center w-9 hover:text-red" aria-label="Kaldır" data-tip="Raftan kaldır" onclick={() => delManga(m)}><Trash2 size={14} /></button>
+          <button class="hidden group-hover:grid place-items-center w-9 hover:text-red" aria-label={t('common.remove')} data-tip={t('home.remove_shelf')} onclick={() => delManga(m)}><Trash2 size={14} /></button>
         </div>
       {/each}
-      {#if !mangas.length}<div class="text-[12.5px] muted p-3.5 leading-5">Raf boş. Bir bölüm klasörü içe aktarın; manga adı klasörden alınır.</div>{/if}
+      {#if !mangas.length}<div class="text-[12.5px] muted p-3.5 leading-5">{t('home.shelf_empty')}</div>{/if}
     </div>
     <div class="shrink-0 border-t-[2.5px] border-ink grid grid-cols-2">
-      <button class="h-[44px] flex items-center justify-center gap-2 font-semibold border-r-[1.5px] border-ink hover:bg-ink hover:text-paper" onclick={() => { app.prefsTab = 'models'; app.dialog = 'prefs'; }}><Boxes size={15} /> Modeller</button>
-      <button class="relative h-[44px] flex items-center justify-center gap-2 font-semibold hover:bg-ink hover:text-paper" onclick={() => { app.prefsTab = 'clean'; app.dialog = 'prefs'; }}><Settings size={15} /> Tercihler</button>
+      <button class="h-[44px] flex items-center justify-center gap-2 font-semibold border-r-[1.5px] border-ink hover:bg-ink hover:text-paper" onclick={() => { app.prefsTab = 'models'; app.dialog = 'prefs'; }}><Boxes size={15} /> {t('common.models')}</button>
+      <button class="relative h-[44px] flex items-center justify-center gap-2 font-semibold hover:bg-ink hover:text-paper" onclick={() => { app.prefsTab = 'clean'; app.dialog = 'prefs'; }}><Settings size={15} /> {t('prefs.title')}</button>
     </div>
     {#if app.hw?.gpu_name}
       <div class="shrink-0 border-t-[1.5px] border-ink px-3.5 py-2 mono text-[10.5px] leading-4 bg-paper">
@@ -106,15 +123,27 @@
   <!-- içerik -->
   <main class="koma overflow-y-auto bg-desk">
     {#if app.project}
-      <button class="btn btn-icon print absolute top-4 right-4 z-10 !h-10 !w-10" aria-label="Kapat" data-tip="Masaya dön  Esc" onclick={close}><X size={18} strokeWidth={2.5} /></button>
+      <button class="btn btn-icon print absolute top-4 right-4 z-10 !h-10 !w-10" aria-label={t('common.close')} data-tip="{t('home.back_desk')}  Esc" onclick={close}><X size={18} strokeWidth={2.5} /></button>
     {/if}
     <div class="max-w-[1120px] px-8 pt-7 pb-12">
+      {#if resume && app.last && sel === 'recent'}
+        <!-- kaldığın yerden devam: tek tıkla son bölüm ve sayfa -->
+        <button class="koma w-full mb-[18px] flex items-stretch text-left group hover:bg-ink hover:text-paper transition-colors" onclick={() => app.resume()}>
+          <span class="w-[64px] shrink-0 border-r-[2.5px] border-ink bg-white overflow-hidden"><img src={thumbUrl(resume.pageId, 1)} alt="" class="w-full h-full object-cover object-top" draggable="false" /></span>
+          <span class="flex-1 min-w-0 px-4 py-3 flex flex-col justify-center">
+            <span class="eyebrow group-hover:!text-paper/70">{t('home.resume')}</span>
+            <span class="disp text-[22px] leading-none mt-1.5 truncate">{app.last.manga}</span>
+            <span class="mono text-[12px] mt-1.5 truncate">{app.last.name} · P.{pad(resume.index + 1)} / {pad(resume.total)}</span>
+          </span>
+          <span class="shrink-0 flex items-center gap-2 pr-5 font-semibold">{t('home.resume_btn')} <ArrowRight size={16} class="transition-transform group-hover:translate-x-1" /></span>
+        </button>
+      {/if}
       {#if noModel}
         <div class="koma !border-red mb-[18px] flex items-center gap-4 pl-5 pr-3 h-[68px] shadow-[5px_5px_0_var(--color-red)]">
-          <span class="tag tag-red">İLK ADIM</span>
-          <span class="font-semibold text-[14px]">Temizlemek için önce bir model indir.</span>
+          <span class="tag tag-red">{t('home.first_step')}</span>
+          <span class="font-semibold text-[14px]">{t('home.need_model')}</span>
           <div class="flex-1"></div>
-          <button class="btn print btn-ink" onclick={() => { app.prefsTab = 'models'; app.dialog = 'prefs'; }}><Download size={15} strokeWidth={2.5} /> Model indir</button>
+          <button class="btn print btn-ink" onclick={() => { app.prefsTab = 'models'; app.dialog = 'prefs'; }}><Download size={15} strokeWidth={2.5} /> {t('home.get_model')}</button>
         </div>
       {/if}
       {#if sel === 'recent'}
@@ -123,42 +152,42 @@
           <div class="koma p-5 {app.dragging ? '!border-dashed' : ''}">
             <div class="absolute inset-y-0 right-0 w-[38%] tone-light border-l-[1.5px] border-ink"></div>
             <div class="relative">
-              <div class="disp text-[34px] leading-[0.95]">Hızlı<br />temizlik</div>
-              <p class="mt-3 max-w-[300px] leading-5">Sayfaları ya da bir klasörü pencereye bırakın. Kütüphaneye eklemeden doğrudan masaya açılır.</p>
+              <div class="disp text-[34px] leading-[0.95]">{t('home.quick_1')}<br />{t('home.quick_2')}</div>
+              <p class="mt-3 max-w-[300px] leading-5">{t('home.quick_desc')}</p>
               <div class="flex gap-3 mt-5">
-                <button class="btn print btn-ink" onclick={() => quickFromPicker('files')}><Images size={16} /> Sayfa seç</button>
-                <button class="btn print" onclick={() => quickFromPicker('folder')}><FolderOpen size={16} /> Klasör seç</button>
+                <button class="btn print btn-ink" onclick={() => quickFromPicker('files')}><Images size={16} /> {t('home.pick_pages')}</button>
+                <button class="btn print" onclick={() => quickFromPicker('folder')}><FolderOpen size={16} /> {t('home.pick_folder')}</button>
               </div>
             </div>
-            <div class="absolute right-6 top-1/2 -translate-y-1/2 disp text-[15px] bg-sheet border-[2.5px] border-ink px-3 py-2 rotate-[4deg] shadow-[4px_4px_0_var(--color-ink)]">Sürükle → bırak</div>
+            <div class="absolute right-6 top-1/2 -translate-y-1/2 disp text-[15px] bg-sheet border-[2.5px] border-ink px-3 py-2 rotate-[4deg] shadow-[4px_4px_0_var(--color-ink)]">{t('home.drag_drop')}</div>
           </div>
           <button class="koma p-5 text-left flex flex-col group hover:bg-ink hover:text-paper transition-colors" onclick={() => importChapterFolder()}>
             <FolderInput size={26} strokeWidth={2} />
-            <div class="disp text-[34px] leading-[0.95] mt-3">Bölüm<br />içe aktar</div>
-            <p class="mt-3 leading-5 opacity-80">Bölüm klasörü ya da bölümleri içeren manga klasörü. Raf'a eklenir.</p>
-            <div class="mt-auto pt-3 font-semibold flex items-center gap-1.5">Klasör seç <ArrowRight size={15} class="transition-transform group-hover:translate-x-1" /></div>
+            <div class="disp text-[34px] leading-[0.95] mt-3">{t('home.import_1')}<br />{t('home.import_2')}</div>
+            <p class="mt-3 leading-5 opacity-80">{t('home.import_desc')}</p>
+            <div class="mt-auto pt-3 font-semibold flex items-center gap-1.5">{t('home.pick_folder')} <ArrowRight size={15} class="transition-transform group-hover:translate-x-1" /></div>
           </button>
         </div>
       {:else if curManga}
         <div class="flex items-end gap-4 mb-7">
           <div class="min-w-0">
-            <div class="eyebrow mb-1.5">Raf / {pad(curManga.chapters)} bölüm</div>
+            <div class="eyebrow mb-1.5">{t('home.shelf_count', { n: pad(curManga.chapters) })}</div>
             <h1 class="disp text-[42px] leading-[0.95] truncate">{curManga.name}</h1>
           </div>
           <div class="flex-1"></div>
-          <button class="btn print shrink-0" onclick={() => importChapterFolder(curManga.id, curManga.name)}><FolderInput size={16} /> Bölüm ekle</button>
+          <button class="btn print shrink-0" onclick={() => importChapterFolder(curManga.id, curManga.name)}><FolderInput size={16} /> {t('home.add_chapter')}</button>
         </div>
       {/if}
 
       <div class="flex items-center gap-3 mb-4">
-        <h2 class="disp text-[22px] leading-none">{sel === 'recent' ? 'Masadaki bölümler' : 'Bölümler'}</h2>
+        <h2 class="disp text-[22px] leading-none">{sel === 'recent' ? t('home.h_recent') : t('home.h_chapters')}</h2>
         <span class="mono text-[12px]">{pad(cards.length)}</span>
         <span class="flex-1 border-t-[2.5px] border-ink"></span>
       </div>
       {#if !cards.length}
         <div class="border-[2.5px] border-dashed border-ink/50 py-12 text-center">
-          <div class="font-semibold">Burada henüz bölüm yok.</div>
-          <div class="mono text-[11.5px] muted mt-1">bölüm içe aktarın ya da sayfaları pencereye bırakın</div>
+          <div class="font-semibold">{t('home.no_chapters')}</div>
+          <div class="mono text-[11.5px] muted mt-1">{t('home.no_chapters_sub')}</div>
         </div>
       {/if}
       <div class="grid gap-x-6 gap-y-7" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
@@ -168,8 +197,8 @@
             onclick={() => app.openChapter(c.ch.id, c.ch.name, c.manga)} onkeydown={(e) => e.key === 'Enter' && app.openChapter(c.ch.id, c.ch.name, c.manga)}>
             <div class="relative bg-white border-[2px] border-ink aspect-[3/4] overflow-hidden shadow-[5px_5px_0_var(--color-ink)] transition-[transform,box-shadow] duration-100 group-hover:-translate-x-0.5 group-hover:-translate-y-0.5 group-hover:shadow-[8px_8px_0_var(--color-ink)]">
               {#if c.thumb}<img src={thumbUrl(c.thumb, 1)} alt="" class="w-full h-full object-cover object-top" draggable="false" />{/if}
-              <button class="absolute top-0 left-0 w-8 h-8 grid place-items-center bg-ink text-paper hover:bg-red opacity-0 group-hover:opacity-100" aria-label="Kaldır" data-tip="Raftan kaldır" onclick={(e) => delChapter(c, e)}><Trash2 size={14} /></button>
-              <button class="absolute top-0 left-8 w-8 h-8 grid place-items-center bg-ink text-paper hover:bg-blue opacity-0 group-hover:opacity-100 border-l border-paper/30" aria-label="Adını değiştir" data-tip="Adını değiştir" onclick={(e) => { e.stopPropagation(); renId = c.ch.id; renDraft = c.ch.name; }}><Pencil size={13} /></button>
+              <button class="absolute top-0 left-0 w-8 h-8 grid place-items-center bg-ink text-paper hover:bg-red opacity-0 group-hover:opacity-100" aria-label={t('common.remove')} data-tip={t('home.remove_shelf')} onclick={(e) => delChapter(c, e)}><Trash2 size={14} /></button>
+              <button class="absolute top-0 left-8 w-8 h-8 grid place-items-center bg-ink text-paper hover:bg-blue opacity-0 group-hover:opacity-100 border-l border-paper/30" aria-label={t('home.rename')} data-tip={t('home.rename')} onclick={(e) => { e.stopPropagation(); renId = c.ch.id; renDraft = c.ch.name; }}><Pencil size={13} /></button>
             </div>
             {#if done}<span class="absolute -right-3 top-3"><Stamp size={54} /></span>{/if}
             <!-- ilerleme: temiz sayfa sayısı, mürekkep dolgulu şerit -->

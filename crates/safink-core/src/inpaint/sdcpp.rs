@@ -31,7 +31,7 @@ pub fn find_sdcli(paths: &AppPaths) -> Option<PathBuf> {
 
 impl SdCppInpainter {
     pub fn new(paths: &AppPaths, spec: &ModelSpec, settings: &Settings) -> Result<Self> {
-        let exe = find_sdcli(paths).ok_or_else(|| anyhow!("çalışma ortamı kurulu değil; modeli yeniden indirin"))?;
+        let exe = find_sdcli(paths).ok_or_else(|| anyhow!(crate::loc::pick("çalışma ortamı kurulu değil; modeli yeniden indirin", "runtime is not installed; download the model again")))?;
         let workdir = paths.work().join("sdcpp");
         std::fs::create_dir_all(&workdir)?;
         let model_paths = spec.active_files().into_iter().map(|f| (f.role.clone(), spec.dir(paths).join(&f.name))).collect();
@@ -105,7 +105,7 @@ impl Inpainter for SdCppInpainter {
         let status = loop {
             if ctx.cancel.load(Ordering::Relaxed) {
                 let _ = child.kill();
-                bail!("iptal edildi");
+                bail!(crate::loc::pick("iptal edildi", "cancelled"));
             }
             if let Some(s) = child.try_wait()? {
                 break s;
@@ -115,7 +115,7 @@ impl Inpainter for SdCppInpainter {
         if !status.success() || !outp.exists() {
             let err = std::fs::read_to_string(&log).unwrap_or_default();
             let tail: String = err.lines().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ");
-            bail!("sd-cli başarısız ({}): {}", status, tail);
+            bail!(crate::t!("sd-cli başarısız ({}): {}", "sd-cli failed ({}): {}", status, tail));
         }
         let out = image::open(&outp)?.to_rgb8();
         for p in [&inp, &outp] {

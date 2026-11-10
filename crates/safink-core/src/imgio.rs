@@ -45,10 +45,10 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 pub fn load_rgb(path: &Path) -> Result<RgbImage> {
     let img = image::ImageReader::open(path)
-        .with_context(|| format!("açılamadı: {}", path.display()))?
+        .with_context(|| crate::t!("açılamadı: {}", "could not open: {}", path.display()))?
         .with_guessed_format()?
         .decode()
-        .with_context(|| format!("çözülemedi: {}", path.display()))?;
+        .with_context(|| crate::t!("çözülemedi: {}", "could not decode: {}", path.display()))?;
     Ok(flatten_rgb(img))
 }
 
@@ -70,7 +70,7 @@ pub fn flatten_rgb(img: DynamicImage) -> RgbImage {
 }
 
 pub fn load_gray(path: &Path) -> Result<GrayImage> {
-    Ok(image::open(path).with_context(|| format!("maske açılamadı: {}", path.display()))?.to_luma8())
+    Ok(image::open(path).with_context(|| crate::t!("maske açılamadı: {}", "could not open mask: {}", path.display()))?.to_luma8())
 }
 
 pub fn dimensions(path: &Path) -> Result<(u32, u32)> {

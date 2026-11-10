@@ -1,17 +1,12 @@
 <script lang="ts">
   import { Paintbrush, Eraser, Lasso, Hand, ZoomIn } from 'lucide-svelte';
   import { app } from '../lib/store.svelte';
+  import { t } from '../lib/i18n/index.svelte';
   import Scrub from '../ui/Scrub.svelte';
   import Segmented from '../ui/Segmented.svelte';
 
-  const meta = {
-    brush: { icon: Paintbrush, name: 'Fırça', hint: 'mavi kalem: kaçan yazıyı boya' },
-    eraser: { icon: Eraser, name: 'Silgi', hint: 'yanlış işaretlenen yeri sil' },
-    lasso: { icon: Lasso, name: 'Kement', hint: 'çiz, bırak · Alt: tersi' },
-    hand: { icon: Hand, name: 'El', hint: 'sürükle: kaydır' },
-    zoom: { icon: ZoomIn, name: 'Büyüteç', hint: 'tıkla · Alt: uzaklaş' },
-  } as const;
-  const m = $derived(meta[app.tool]);
+  const icons = { brush: Paintbrush, eraser: Eraser, lasso: Lasso, hand: Hand, zoom: ZoomIn } as const;
+  const m = $derived({ icon: icons[app.tool], name: t(`tool.${app.tool}`), hint: t(`tool.${app.tool}_hint`) });
   const cmp = $derived(!app.compare ? 'mask' : app.split ? 'split' : 'result');
   function setCmp(v: string) { app.compare = v !== 'mask'; app.split = v === 'split'; }
   const drawing = $derived(app.tool === 'brush' || app.tool === 'eraser');
@@ -25,25 +20,25 @@
   </div>
   {#if drawing}
     <div class="flex items-center px-2 border-r-[1.5px] border-ink">
-      <Scrub bind:value={app.brushSize} min={2} max={400} label="Boyut" unit="px" width="180px" compact tip="[ ve ] ile de değişir" />
+      <Scrub bind:value={app.brushSize} min={2} max={400} label={t('tool.size')} unit="px" width="180px" compact tip={t('tool.size_tip')} />
     </div>
   {:else if app.tool === 'lasso'}
     <div class="flex items-center px-2 border-r-[1.5px] border-ink">
-      <Segmented bind:value={app.lassoMode} compact options={[{ value: 'add', label: 'Maskeye ekle' }, { value: 'remove', label: 'Maskeden sil' }]} />
+      <Segmented bind:value={app.lassoMode} compact options={[{ value: 'add', label: t('tool.lasso_add') }, { value: 'remove', label: t('tool.lasso_remove') }]} />
     </div>
   {:else}
     <div class="flex items-center px-2 gap-1.5 border-r-[1.5px] border-ink">
-      <button class="btn btn-sm" onclick={() => app.cv?.fit('page')}>Sayfaya sığdır</button>
-      <button class="btn btn-sm" onclick={() => app.cv?.fit('width')}>Genişliğe</button>
-      <button class="btn btn-sm" onclick={() => app.cv?.zoomTo(1)}>%100</button>
+      <button class="btn btn-sm" onclick={() => app.cv?.fit('page')}>{t('view.fit_page')}</button>
+      <button class="btn btn-sm" onclick={() => app.cv?.fit('width')}>{t('tool.width')}</button>
+      <button class="btn btn-sm" onclick={() => app.cv?.zoomTo(1)}>{t('tool.pct100')}</button>
     </div>
   {/if}
   <div class="flex items-center px-2 border-r-[1.5px] border-ink">
-    <Scrub bind:value={maskOp} min={0.1} max={1} step={0.05} percent label="Kalem izi" width="150px" compact onchange={setOp} tip="Maske katmanlarının opaklığı" />
+    <Scrub bind:value={maskOp} min={0.1} max={1} step={0.05} percent label={t('tool.marks')} width="150px" compact onchange={setOp} tip={t('tool.marks_tip')} />
   </div>
   {#if app.hasClean}
     <div class="flex items-center px-2 border-r-[1.5px] border-ink">
-      <Segmented value={cmp} onchange={setCmp} compact options={[{ value: 'mask', label: 'Maske', tip: 'C' }, { value: 'split', label: 'Önce | Sonra', tip: 'çizgiyi sürükle' }, { value: 'result', label: 'Sonuç', tip: 'C · \\ basılı: orijinal' }]} />
+      <Segmented value={cmp} onchange={setCmp} compact options={[{ value: 'mask', label: t('tool.cmp_mask'), tip: 'C' }, { value: 'split', label: t('tool.cmp_split'), tip: t('tool.cmp_split_tip') }, { value: 'result', label: t('tool.cmp_result'), tip: t('tool.cmp_result_tip') }]} />
     </div>
   {/if}
   <div class="flex-1 min-w-0 flex items-center justify-end px-3.5 mono text-[11px] muted truncate max-[1500px]:hidden">{m.hint}</div>

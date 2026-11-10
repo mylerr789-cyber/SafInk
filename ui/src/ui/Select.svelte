@@ -5,12 +5,13 @@
 <script lang="ts" generics="V extends string">
   import { ChevronDown, Check } from 'lucide-svelte';
   import type { Snippet } from 'svelte';
+  import { t } from '../lib/i18n/index.svelte';
 
   interface Props {
     value: V; options: Opt<V>[]; placeholder?: string; onchange?: (v: V) => void; width?: string; compact?: boolean;
     disabled?: boolean; footer?: Snippet<[() => void]>; align?: 'left' | 'right'; menuWidth?: string; aside?: string;
   }
-  let { value = $bindable(), options, placeholder = 'Seçin', onchange, width = '', compact = false, disabled = false, footer, align = 'left', menuWidth = '', aside = '' }: Props = $props();
+  let { value = $bindable(), options, placeholder = '', onchange, width = '', compact = false, disabled = false, footer, align = 'left', menuWidth = '', aside = '' }: Props = $props();
 
   let open = $state(false);
   let hl = $state(-1);
@@ -48,7 +49,7 @@
   <button type="button" class="w-full flex items-center gap-2.5 bg-sheet border-[1.5px] border-ink text-left {compact ? 'h-[28px] px-2' : 'h-[36px] px-2.5'} {open ? 'shadow-[3px_3px_0_var(--color-ink)]' : 'hover:shadow-[3px_3px_0_var(--color-ink)]'} disabled:opacity-35"
     {disabled} onclick={toggle} onkeydown={key} aria-haspopup="listbox" aria-expanded={open}>
     {#if cur?.mark}<span class="w-2 h-2 rounded-full shrink-0 {cur.mark === 'ok' ? 'bg-ink' : 'border-[1.5px] border-ink3'}"></span>{/if}
-    <span class="flex-1 truncate font-semibold {cur ? '' : 'muted font-normal'}">{cur?.label ?? placeholder}</span>
+    <span class="flex-1 truncate font-semibold {cur ? '' : 'muted font-normal'}">{cur?.label ?? (placeholder || t('common.choose'))}</span>
     {#if aside}<span class="mono text-[11px] muted shrink-0">{aside}</span>{/if}
     <ChevronDown size={14} strokeWidth={2.25} class="shrink-0 transition-transform {open ? 'rotate-180' : ''}" />
   </button>

@@ -1,6 +1,7 @@
 import { pick as open } from './host';
 import { api } from './api';
 import { app } from './store.svelte';
+import { t } from './i18n/index.svelte';
 
 const lastSeg = (p: string, up = 0) => {
   const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
@@ -9,7 +10,7 @@ const lastSeg = (p: string, up = 0) => {
 
 /** Klasör seç ve (verilen ya da klasörün üst klasör adından türetilen) mangaya içe aktar; ilk bölümü aç. */
 export async function importChapterFolder(mangaId?: number, mangaName?: string) {
-  const dir = await open({ directory: true, title: 'Bölüm klasörünü seç (ya da bölümleri içeren klasör)' });
+  const dir = await open({ directory: true, title: t('act.pick_chapter') });
   if (!dir) return;
   try {
     let mid = mangaId;
@@ -22,13 +23,13 @@ export async function importChapterFolder(mangaId?: number, mangaName?: string) 
     const chs = await api.listChapters(mid);
     const ch = chs.find((c) => c.id === ids[0]);
     await app.openChapter(ids[0], ch?.name ?? lastSeg(dir as string), mname || 'Manga');
-    app.toast(`${ids.length} bölüm içe aktarıldı`, 'ok');
+    app.toast(t('act.imported', { n: ids.length }), 'ok');
   } catch (e) { app.toast(String(e), 'err'); }
 }
 
 export async function importPages() {
   if (!app.project) return;
-  const f = await open({ multiple: true, filters: [{ name: 'Görseller', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }] });
+  const f = await open({ multiple: true, filters: [{ name: t('act.images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }] });
   if (!f) return;
   try {
     await api.addToChapter(app.project.chapterId, Array.isArray(f) ? f : [f]);
@@ -39,12 +40,12 @@ export async function importPages() {
 export async function quickFromPicker(kind: 'folder' | 'files') {
   const f = kind === 'folder'
     ? await open({ directory: true })
-    : await open({ multiple: true, filters: [{ name: 'Görseller', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }] });
+    : await open({ multiple: true, filters: [{ name: t('act.images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }] });
   if (f) await app.quick(Array.isArray(f) ? f : [f as string]);
 }
 
 export async function resetPageEdits() {
-  if (!app.page || !(await app.ask('Bu sayfadaki elle düzeltmeler silinsin? Otomatik maske korunur.'))) return;
+  if (!app.page || !(await app.ask(t('act.ask_reset')))) return;
   await app.cv?.flush();
   await api.resetEdits(app.page.id);
   app.cv?.reloadAll();

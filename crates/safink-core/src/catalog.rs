@@ -35,9 +35,11 @@ pub struct ModelSpec {
     pub adapter: String,
     #[serde(default)]
     pub variant: String,
-    /// Kartta görünen tek kısa Türkçe cümle.
+    /// Kartta görünen tek kısa cümle (Türkçe); `description_en` İngilizcesi.
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub description_en: String,
     #[serde(default)]
     pub license: String,
     #[serde(default)]

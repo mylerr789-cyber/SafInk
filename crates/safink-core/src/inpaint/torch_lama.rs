@@ -26,7 +26,7 @@ impl TorchLama {
             "kind": spec.params.get("torch").and_then(|v| v.as_str()).unwrap_or("auto"),
         }))?;
         if r["ok"] != true {
-            bail!("LaMa (GPU) yüklenemedi: {}", r["error"]);
+            bail!(crate::t!("LaMa (GPU) yüklenemedi: {}", "could not load LaMa (GPU): {}", r["error"]));
         }
         Ok(Self { w, label: format!("{} [GPU]", spec.name), counter: 0 })
     }
@@ -37,7 +37,7 @@ impl Inpainter for TorchLama {
     fn policy(&self) -> WindowPolicy { WindowPolicy::Fixed(S) }
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
-            bail!("iptal edildi");
+            bail!(crate::loc::pick("iptal edildi", "cancelled"));
         }
         self.counter += 1;
         let d = self.w.workdir.clone();
@@ -46,7 +46,7 @@ impl Inpainter for TorchLama {
         mask.save(&mp)?;
         let r = self.w.call(&serde_json::json!({"cmd": "run", "image": inp.to_string_lossy(), "mask": mp.to_string_lossy(), "out": outp.to_string_lossy()}))?;
         if r["ok"] != true {
-            bail!("LaMa (GPU) hatası: {}", r["error"]);
+            bail!(crate::t!("LaMa (GPU) hatası: {}", "LaMa (GPU) error: {}", r["error"]));
         }
         let out = image::open(&outp)?.to_rgb8();
         for p in [&inp, &mp, &outp] {

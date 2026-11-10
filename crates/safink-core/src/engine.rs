@@ -192,7 +192,7 @@ impl Engine {
             }
         }
         if ids.is_empty() {
-            bail!("klasörde görüntü bulunamadı: {}", folder.display());
+            bail!(crate::t!("klasörde görüntü bulunamadı: {}", "no images found in folder: {}", folder.display()));
         }
         Ok(ids)
     }
@@ -214,7 +214,7 @@ impl Engine {
             }
         }
         if files.is_empty() {
-            bail!("görüntü bulunamadı");
+            bail!(crate::loc::pick("görüntü bulunamadı", "no images found"));
         }
         let mid = self.db.ensure_manga("__quick__")?;
         let name = format!("Quick Clean {}", chrono_like_stamp());
@@ -289,7 +289,7 @@ impl Engine {
             }
             let r = api.fetch_mask(&name, bytes, &mime, conf, &ctl.cancel, on_wait).await?;
             // geçerli PNG mi doğrula
-            image::load_from_memory(&r.png).map_err(|e| anyhow!("API geçersiz maske döndü: {e}"))?;
+            image::load_from_memory(&r.png).map_err(|e| anyhow!(crate::t!("API geçersiz maske döndü: {e}", "API returned an invalid mask: {e}")))?;
             crate::paths::atomic_write(&mp, &r.png)?;
             let _ = std::fs::write(mp.with_extension("det"), r.detections.to_string());
             if matches!(page.status.as_str(), "new" | "error" | "mask_fetched") {
@@ -315,14 +315,14 @@ impl Engine {
         let ep = self.paths.edit_file(page.id);
         let edit = if ep.exists() { imgio::load_gray(&ep).ok() } else { None };
         if api.is_none() && edit.is_none() {
-            bail!("bu sayfa için maske yok (önce maskeleri çekin)");
+            bail!(crate::loc::pick("bu sayfa için maske yok (önce maskeleri çekin)", "no mask for this page (fetch masks first)"));
         }
         Ok(maskops::combine(api.as_ref(), edit.as_ref(), page.width as u32, page.height as u32))
     }
 
     /// Düz zeminler önce doldurulur; yalnızca kalan bileşenler varsa model (`make` ile tembel) yüklenir.
     fn clean_page(&self, pid: i64, inp: &mut Option<Box<dyn inpaint::Inpainter>>, make: &mut dyn FnMut() -> Result<Box<dyn inpaint::Inpainter>>, params: &CleanParams, cancel: &AtomicBool, prog: &dyn Fn(usize, usize)) -> Result<()> {
-        let page = self.db.page(pid)?.ok_or_else(|| anyhow!("sayfa yok"))?;
+        let page = self.db.page(pid)?.ok_or_else(|| anyhow!(crate::loc::pick("sayfa yok", "page not found")))?;
         let img = imgio::load_rgb(Path::new(&page.path))?;
         let mask = self.final_mask(&page)?;
         let (mw, mh) = (img.width(), img.height());
@@ -368,7 +368,7 @@ impl Engine {
     pub fn start_job(self: &Arc<Self>, spec: JobSpec) -> Result<u64> {
         let mut g = self.job.lock();
         if g.is_some() {
-            bail!("zaten çalışan bir iş var");
+            bail!(crate::loc::pick("zaten çalışan bir iş var", "a job is already running"));
         }
         let id = self.job_counter.fetch_add(1, Ordering::Relaxed);
         let ctl = Arc::new(JobCtl { cancel: AtomicBool::new(false), paused: AtomicBool::new(false), id });
@@ -378,7 +378,7 @@ impl Engine {
         tokio::spawn(async move {
             let res = me.clone().run_job(spec.clone(), ctl.clone()).await;
             let (state, msg) = match res {
-                Ok(()) if ctl.cancel.load(Ordering::Relaxed) => ("cancelled", "iptal edildi".to_string()),
+                Ok(()) if ctl.cancel.load(Ordering::Relaxed) => ("cancelled", crate::loc::pick("iptal edildi", "cancelled")),
                 Ok(()) => ("done", String::new()),
                 Err(e) => ("error", e.to_string()),
             };
@@ -412,9 +412,9 @@ impl Engine {
 
         // model önceden doğrula (hata erken görünsün)
         let model_spec = if clean {
-            let m = self.catalog.get(&model_id).ok_or_else(|| anyhow!("model bulunamadı: {model_id}"))?.clone();
+            let m = self.catalog.get(&model_id).ok_or_else(|| anyhow!(crate::t!("model bulunamadı: {model_id}", "model not found: {model_id}")))?.clone();
             if !m.is_installed(&self.paths) {
-                bail!("model kurulu değil: {} (Modeller bölümünden indirin)", m.name);
+                bail!(crate::t!("model kurulu değil: {} (Modeller bölümünden indirin)", "model not installed: {} (download it in Models)", m.name));
             }
             Some(m)
         } else {
@@ -510,10 +510,10 @@ impl Engine {
             let (w2, m2, mk2) = (wait_bits.clone(), message.clone(), mk.clone());
             let on_wait = move |secs: f64, why: &str| {
                 w2.store(secs.to_bits(), Ordering::Relaxed);
-                *m2.lock() = format!("{why}; {secs:.0} sn bekleniyor");
+                *m2.lock() = crate::t!("{why}; {secs:.0} sn bekleniyor", "{why}; waiting {secs:.0} s");
                 mk2("running");
             };
-            *message.lock() = "maske alınıyor".into();
+            *message.lock() = crate::loc::pick("maske alınıyor", "fetching mask");
             mk("running");
             // maske zaten varsa ve düzenleme-yalnız (API'siz) sayfa değilse ağa gitmez
             match me.ensure_mask(&page, conf, &ctl, &on_wait).await {
@@ -628,15 +628,15 @@ impl Engine {
     /// Tek tuş: gerekli çalışma ortamı (sd.cpp derlemesi ya da Python ortamı) önce otomatik kurulur, sonra model indirilir.
     /// Arayüz yalnızca `id` için tek ilerleme çubuğu görür (`Download` olayları, `phase` ile Türkçe aşama adı).
     pub fn install_model(self: &Arc<Self>, id: &str) -> Result<()> {
-        let spec = self.catalog.get(id).ok_or_else(|| anyhow!("model yok"))?.clone();
+        let spec = self.catalog.get(id).ok_or_else(|| anyhow!(crate::loc::pick("model yok", "no such model")))?.clone();
         if !spec.visible() && spec.kind != "runtime" {
-            bail!("bu model bu bilgisayarda kullanılamaz");
+            bail!(crate::loc::pick("bu model bu bilgisayarda kullanılamaz", "this model cannot be used on this computer"));
         }
         let cancel = Arc::new(AtomicBool::new(false));
         {
             let mut g = self.dl_cancel.lock();
             if g.contains_key(id) {
-                bail!("bu model zaten indiriliyor");
+                bail!(crate::loc::pick("bu model zaten indiriliyor", "this model is already downloading"));
             }
             g.insert(id.to_string(), cancel.clone());
         }
@@ -648,7 +648,7 @@ impl Engine {
             let r = me.run_install_chain(&spec.id, steps, &token, &cancel).await;
             me.dl_cancel.lock().remove(&spec.id);
             if let Err(e) = r {
-                let msg = if cancel.load(Ordering::Relaxed) { "iptal edildi".to_string() } else { e.to_string() };
+                let msg = if cancel.load(Ordering::Relaxed) { crate::loc::pick("iptal edildi", "cancelled") } else { e.to_string() };
                 me.emit(Event::Download(Progress { model_id: spec.id.clone(), file: msg, file_done: 0, file_total: 0, done: 0, total: 0, stage: "error".into(), phase: String::new() }));
             }
         });
@@ -663,8 +663,8 @@ impl Engine {
         let mut offset = 0u64;
         for (i, st) in steps.iter().enumerate() {
             let last = i + 1 == n;
-            let phase = if st.kind != "runtime" { "Model indiriliyor" } else if st.variant == "python" { "Çalışma ortamı kuruluyor" } else { "Çalışma ortamı indiriliyor" };
-            let ch = Chain { report_id, offset, grand, phase, last };
+            let phase = if st.kind != "runtime" { crate::loc::pick("Model indiriliyor", "Downloading model") } else if st.variant == "python" { crate::loc::pick("Çalışma ortamı kuruluyor", "Setting up runtime") } else { crate::loc::pick("Çalışma ortamı indiriliyor", "Downloading runtime") };
+            let ch = Chain { report_id, offset, grand, phase: &phase, last };
             let em = self.clone();
             let emit = move |p: Progress| em.emit(Event::Download(p));
             let w = weight(st);

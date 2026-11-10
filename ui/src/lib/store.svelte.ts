@@ -1,5 +1,6 @@
 import { listen, pick } from './host';
 import { api, type Settings, type JobEvt, type Model, type Hardware, type Page, type Preset } from './api';
+import { i18n, t, type Locale } from './i18n/index.svelte';
 
 export type Tool = 'hand' | 'zoom' | 'brush' | 'eraser' | 'lasso';
 export type PrefsTab = 'clean' | 'export' | 'models';
@@ -9,6 +10,8 @@ interface DlState { stage: string; done: number; total: number; file: string; ph
 interface Layer { vis: boolean; op: number }
 
 export interface Opts { preset_id: string; model_id: string; confidence: number; dilation: number; feather: number }
+
+export interface LastOpen { chapterId: number; name: string; manga: string; pageId: number; index: number }
 
 function load<T>(k: string, d: T): T {
   try { const v = localStorage.getItem(k); return v ? { ...d, ...JSON.parse(v) } : d; } catch { return d; }
@@ -67,7 +70,36 @@ class AppState {
   hasClean = $state(false);
   hasApiMask = $state(false);
 
+  // maske genişletme önizlemesi: değer denetimi üstündeyken ya da yakın zamanda değiştirilince tuvalde gösterilir
+  dilHover = $state(false);
+  dilPoke = $state(false);
+  private dilTimer: any = null;
+  get dilOn() { return this.dilHover || this.dilPoke; }
+  pokeDilation() {
+    this.dilPoke = true;
+    clearTimeout(this.dilTimer);
+    this.dilTimer = setTimeout(() => (this.dilPoke = false), 1400);
+  }
+
+  // "kaldığın yerden devam": son açılan bölüm ve sayfa
+  last = $state<LastOpen | null>(load<LastOpen | null>('safink.last', null as any));
+
   private tid = 1;
+
+  get locale(): Locale { return i18n.locale; }
+  /** Arayüz dilini değiştirir ve arka uca bildirir (arka uç iletileri bu dilde gelir). */
+  setLocale(l: Locale) {
+    i18n.set(l);
+    api.setLocale(l).catch(() => {});
+  }
+  saveLast() {
+    const p = this.project, pg = this.page;
+    if (!p || p.quick || !pg) return;
+    const l: LastOpen = { chapterId: p.chapterId, name: p.name, manga: p.manga, pageId: pg.id, index: this.index };
+    this.last = l;
+    try { localStorage.setItem('safink.last', JSON.stringify(l)); } catch {}
+  }
+  forgetLast() { this.last = null; try { localStorage.removeItem('safink.last'); } catch {} }
 
   savePanels() { try { localStorage.setItem('safink.panels', JSON.stringify({ pages: this.pagesOpen, insp: this.inspectorOpen })); } catch {} }
   toggleMask() { const v = !(this.layers.api.vis || this.layers.edit.vis); this.layers.api.vis = v; this.layers.edit.vis = v; this.saveOpts(); }
@@ -80,7 +112,7 @@ class AppState {
     setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === 'err' ? 7000 : action ? 8000 : 3000);
   }
   /** Uygulama içi onay kutusu (tarayıcı confirm'i yerine). */
-  ask(text: string, ok = 'Sil', danger = true): Promise<boolean> {
+  ask(text: string, ok = t('common.delete'), danger = true): Promise<boolean> {
     this.asking?.resolve(false);
     return new Promise((resolve) => (this.asking = { text, ok, danger, resolve }));
   }
@@ -117,6 +149,7 @@ class AppState {
     this.project = { chapterId, name, manga, quick };
     this.pages = await api.listPages(chapterId);
     this.index = Math.min(index, Math.max(0, this.pages.length - 1));
+    this.saveLast();
     this.selected = [];
     this.dialog = null;
   }
@@ -131,6 +164,42 @@ class AppState {
     if (i < 0 || i >= this.pages.length || i === this.index) return;
     await this.cv?.flush();
     this.index = i;
+  }
+  /** Son açılan bölümü ve sayfayı yeniden açar; bölüm artık yoksa son kaydı unutur. */
+  async resume() {
+    const l = this.last;
+    if (!l) return;
+    try {
+      const pages = await api.listPages(l.chapterId);
+      if (!pages.length) { this.forgetLast(); return; }
+      const i = pages.findIndex((p) => p.id === l.pageId);
+      await this.openChapter(l.chapterId, l.name, l.manga, false, i >= 0 ? i : l.index);
+    } catch (e) { this.toast(String(e), 'err'); }
+  }
+  /** Sayfaları sürükleyerek/klavyeyle yeniden sırala: `ids` taşınan sayfalar, `slot` taşınmayanlar arasındaki hedef konum. */
+  async movePages(ids: number[], slot: number) {
+    if (!this.project || !ids.length) return;
+    const set = new Set(ids);
+    const moving = this.pages.filter((p) => set.has(p.id));
+    const rest = this.pages.filter((p) => !set.has(p.id));
+    const at = Math.max(0, Math.min(rest.length, slot));
+    const next = [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+    if (next.every((p, i) => p.id === this.pages[i].id)) return;
+    const cur = this.page?.id;
+    this.pages = next;
+    const ci = next.findIndex((p) => p.id === cur);
+    if (ci >= 0) this.index = ci;
+    try { await api.reorderPages(this.project.chapterId, next.map((p) => p.id)); }
+    catch (e) { this.toast(String(e), 'err'); this.reloadPages(); }
+  }
+  /** Geçerli sayfayı bir yukarı (-1) ya da aşağı (+1) taşır. */
+  async nudgePage(d: -1 | 1) {
+    const i = this.index, p = this.page;
+    if (!p || i + d < 0 || i + d >= this.pages.length) return;
+    const ids = this.selected.length > 1 && this.selected.includes(p.id) ? this.selected : [p.id];
+    const first = this.pages.findIndex((x) => ids.includes(x.id));
+    const before = this.pages.slice(0, first).filter((x) => !ids.includes(x.id)).length;
+    await this.movePages(ids, before + d);
   }
   async quick(paths: string[]) {
     try {
@@ -153,21 +222,21 @@ class AppState {
     if (this.exporting) return;
     const list = onlySelected && this.selected.length ? this.pages.filter((p) => this.selected.includes(p.id)) : this.pages;
     const ready = list.filter((p) => this.statusOf(p) === 'cleaned').length;
-    if (!ready) { this.toast('Dışa aktarılacak temiz sayfa yok. Önce sayfaları temizleyin.', 'err'); return; }
+    if (!ready) { this.toast(t('export.none'), 'err'); return; }
     const skip = list.length - ready;
-    if (skip && !(await this.ask(`${ready} temiz sayfa aktarılacak. ${skip} sayfa henüz temiz değil, atlanacak.`, 'Aktar', false))) return;
+    if (skip && !(await this.ask(t('export.confirm', { n: ready, ready, skip }), t('export.confirm_ok'), false))) return;
     let dir = this.settings?.export_dir;
-    if (!dir) { const d = await pick({ directory: true, title: 'Çıktı klasörü' }); if (!d) return; dir = d as string; }
+    if (!dir) { const d = await pick({ directory: true, title: t('export.pick_title') }); if (!d) return; dir = d as string; }
     this.exporting = true;
     try {
       const r = await api.exportPages(list.map((p) => p.id), dir);
-      this.toast(`${r.ok} sayfa dışa aktarıldı${r.skipped ? ` · ${r.skipped} atlandı` : ''}`, 'ok', { label: 'Klasörü aç', run: () => api.revealPath(r.dir) });
+      this.toast(t('export.done', { n: r.ok }) + (r.skipped ? t('export.skipped', { n: r.skipped }) : ''), 'ok', { label: t('export.open_folder'), run: () => api.revealPath(r.dir) });
     } catch (e) { this.toast(String(e), 'err'); }
     this.exporting = false;
   }
   async deletePage(id: number) {
     const p = this.pages.find((x) => x.id === id);
-    if (!p || !(await this.ask(`"${p.name}" bölümden kaldırılsın? Orijinal dosyaya dokunulmaz.`))) return;
+    if (!p || !(await this.ask(t('pages.ask_remove_one', { name: p.name })))) return;
     await this.cv?.flush();
     try {
       await api.deletePage(id);
@@ -175,13 +244,13 @@ class AppState {
       this.selected = this.selected.filter((x) => x !== id);
       this.pages = await api.listPages(this.project!.chapterId);
       this.index = Math.max(0, Math.min(keep, this.pages.length - 1));
-      this.toast('Sayfa kaldırıldı');
+      this.toast(t('pages.removed_one'));
     } catch (e) { this.toast(String(e), 'err'); }
   }
   async deleteSelected() {
     const ids = [...this.selected];
     if (ids.length === 1) return this.deletePage(ids[0]);
-    if (!ids.length || !(await this.ask(`${ids.length} sayfa bölümden kaldırılsın? Orijinal dosyalara dokunulmaz.`))) return;
+    if (!ids.length || !(await this.ask(t('pages.ask_remove_many', { n: ids.length })))) return;
     await this.cv?.flush();
     try {
       const keep = this.index;
@@ -189,7 +258,7 @@ class AppState {
       this.selected = [];
       this.pages = await api.listPages(this.project!.chapterId);
       this.index = Math.max(0, Math.min(keep, this.pages.length - 1));
-      this.toast(`${ids.length} sayfa kaldırıldı`);
+      this.toast(t('pages.removed_many', { n: ids.length }));
     } catch (e) { this.toast(String(e), 'err'); }
   }
   async renameChapter(id: number, name: string) {
@@ -203,6 +272,7 @@ class AppState {
   }
 
   async init() {
+    api.setLocale(i18n.locale).catch(() => {});
     await this.reloadSettings();
     if (this.settings && !localStorage.getItem('safink.opts')) {
       const p = this.settings.presets.find((x) => x.model_id === this.settings!.model_id) ?? this.settings.presets[0];
@@ -223,14 +293,14 @@ class AppState {
             this.tick++;
             this.reloadPages();
             if (e.state === 'error') this.toast(e.message, 'err');
-            else if (e.state === 'done') this.toast(e.failed ? `Bitti: ${e.total - e.failed} sayfa tamam, ${e.failed} hata` : `Bitti: ${e.total} sayfa işlendi`, e.failed ? 'info' : 'ok');
-            else if (e.state === 'cancelled') this.toast('İş iptal edildi');
+            else if (e.state === 'done') this.toast(e.failed ? t('job.toast_partial', { n: e.total - e.failed, ok: e.total - e.failed, failed: e.failed }) : t('job.toast_done', { n: e.total }), e.failed ? 'info' : 'ok');
+            else if (e.state === 'cancelled') this.toast(t('job.toast_cancelled'));
           }
           break;
         case 'download':
           this.dl[e.model_id] = { stage: e.stage, done: e.done, total: e.total, file: e.file, phase: e.phase ?? '' };
-          if (e.stage === 'done') { this.reloadModels(); this.toast('Model hazır', 'ok'); }
-          else if (e.stage === 'error') { this.toast('Kurulum yapılamadı: ' + e.file, 'err'); this.reloadModels(); }
+          if (e.stage === 'done') { this.reloadModels(); this.toast(t('models.ready'), 'ok'); }
+          else if (e.stage === 'error') { this.toast(t('models.install_failed', { msg: e.file }), 'err'); this.reloadModels(); }
           break;
         case 'import':
           this.importProg = e.done >= e.total ? null : { done: e.done, total: e.total };

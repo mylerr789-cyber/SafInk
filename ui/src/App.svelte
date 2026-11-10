@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { app } from './lib/store.svelte';
+  import { t } from './lib/i18n/index.svelte';
   import { onDragDrop } from './lib/host';
   import TitleBar from './views/TitleBar.svelte';
   import PagesPanel from './views/PagesPanel.svelte';
@@ -22,6 +23,8 @@
     return () => un?.();
   });
   $effect(() => { app.pagesOpen; app.inspectorOpen; app.savePanels(); });
+  // kaldığın yerden devam: açık bölüm/sayfa değiştikçe kaydet
+  $effect(() => { app.project; app.index; app.page?.id; app.saveLast(); });
 
   function onKey(e: KeyboardEvent) {
     const el = e.target as HTMLElement;
@@ -43,6 +46,7 @@
     }
     if (e.key === '?' || e.key === 'F1') { app.help = !app.help; e.preventDefault(); return; }
     if (app.dialog || app.help) return;
+    if (e.altKey && (k === 'arrowup' || k === 'arrowdown') && app.project) { app.nudgePage(k === 'arrowup' ? -1 : 1); e.preventDefault(); return; }
     if (k === 'delete' && app.project && app.page) { if (app.selected.length) app.deleteSelected(); else app.deletePage(app.page.id); e.preventDefault(); }
     else if (k === 'b') app.tool = 'brush';
     else if (k === 'e') app.tool = 'eraser';
@@ -75,7 +79,7 @@
 
 {#if app.importProg}
   <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[150] koma shadow-[5px_5px_0_var(--color-ink)] h-11 px-4 flex items-center gap-3 slidein">
-    <span class="font-semibold">İçe aktarılıyor</span><span class="mono">{app.importProg.done}/{app.importProg.total}</span>
+    <span class="font-semibold">{t('import.running')}</span><span class="mono">{app.importProg.done}/{app.importProg.total}</span>
     <span class="w-40 h-[11px] border-[1.5px] border-ink relative"><span class="tone absolute inset-y-0 left-0" style="width:{(app.importProg.done / app.importProg.total) * 100}%"></span></span>
   </div>
 {/if}
@@ -89,19 +93,19 @@
   <div class="fixed inset-0 z-[200] pointer-events-none p-4 bg-paper/70 fade-in">
     <div class="w-full h-full border-[3px] border-dashed border-ink grid place-items-center">
       <div class="text-center">
-        <div class="disp text-[64px] leading-none">Bırak</div>
-        <div class="mono mt-2">sayfalar ya da klasör → hızlı temizlik</div>
+        <div class="disp text-[64px] leading-none">{t('drop.title')}</div>
+        <div class="mono mt-2">{t('drop.sub')}</div>
       </div>
     </div>
   </div>
 {/if}
 
 <div class="fixed bottom-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2.5 z-[160] pointer-events-none">
-  {#each app.toasts as t (t.id)}
-    <div class="slidein pointer-events-auto flex items-center gap-2.5 pl-2 pr-4 py-2 max-w-[560px] bg-sheet border-2 {t.kind === 'err' ? 'border-red shadow-[4px_4px_0_var(--color-red)]' : 'border-ink shadow-[4px_4px_0_var(--color-ink)]'}">
-      <span class="tag {t.kind === 'err' ? 'tag-red' : t.kind === 'ok' ? 'tag-ink' : ''}">{t.kind === 'err' ? 'HATA' : t.kind === 'ok' ? 'TAMAM' : 'NOT'}</span>
-      <span class="select-text font-medium">{t.text}</span>
-      {#if t.action}<button class="ml-2 font-semibold underline decoration-2 underline-offset-2 hover:text-red" onclick={() => { t.action?.run(); app.toasts = app.toasts.filter((x) => x.id !== t.id); }}>{t.action.label}</button>{/if}
+  {#each app.toasts as tst (tst.id)}
+    <div class="slidein pointer-events-auto flex items-center gap-2.5 pl-2 pr-4 py-2 max-w-[560px] bg-sheet border-2 {tst.kind === 'err' ? 'border-red shadow-[4px_4px_0_var(--color-red)]' : 'border-ink shadow-[4px_4px_0_var(--color-ink)]'}">
+      <span class="tag {tst.kind === 'err' ? 'tag-red' : tst.kind === 'ok' ? 'tag-ink' : ''}">{tst.kind === 'err' ? t('toast.err') : tst.kind === 'ok' ? t('toast.ok') : t('toast.note')}</span>
+      <span class="select-text font-medium">{tst.text}</span>
+      {#if tst.action}<button class="ml-2 font-semibold underline decoration-2 underline-offset-2 hover:text-red" onclick={() => { tst.action?.run(); app.toasts = app.toasts.filter((x) => x.id !== tst.id); }}>{tst.action.label}</button>{/if}
     </div>
   {/each}
 </div>
