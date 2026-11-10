@@ -16,6 +16,7 @@ pub struct SdCppInpainter {
     spec: ModelSpec,
     model_paths: Vec<(String, PathBuf)>,
     counter: u32,
+    prep: super::InputPrep,
 }
 
 /// Donanıma uygun sd.cpp derlemesini bulur (NVIDIA: CUDA 12, diğer GPU: Vulkan, GPU yok: CPU); yoksa kurulu olan ilk derleme.
@@ -29,12 +30,13 @@ pub fn find_sdcli(paths: &AppPaths) -> Option<PathBuf> {
 }
 
 impl SdCppInpainter {
-    pub fn new(paths: &AppPaths, spec: &ModelSpec, _settings: &Settings) -> Result<Self> {
+    pub fn new(paths: &AppPaths, spec: &ModelSpec, settings: &Settings) -> Result<Self> {
         let exe = find_sdcli(paths).ok_or_else(|| anyhow!("çalışma ortamı kurulu değil; modeli yeniden indirin"))?;
         let workdir = paths.work().join("sdcpp");
         std::fs::create_dir_all(&workdir)?;
         let model_paths = spec.active_files().into_iter().map(|f| (f.role.clone(), spec.dir(paths).join(&f.name))).collect();
-        Ok(Self { exe, workdir, spec: spec.clone(), model_paths, counter: 0 })
+        let prep = super::InputPrep::new(paths, spec, settings)?;
+        Ok(Self { exe, workdir, spec: spec.clone(), model_paths, counter: 0, prep })
     }
 
     fn pf(&self, key: &str, default: f64) -> f64 { self.spec.params.get(key).and_then(|v| v.as_f64()).unwrap_or(default) }
@@ -45,10 +47,11 @@ impl Inpainter for SdCppInpainter {
     fn label(&self) -> String { format!("sd.cpp · {}", self.spec.name) }
     fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
 
-    fn inpaint(&mut self, img: &RgbImage, _mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
+    fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         self.counter += 1;
         let (w0, h0) = img.dimensions();
-        let padded = super::pad16(img);
+        let prepared = self.prep.prepare(img, mask, ctx)?;
+        let padded = super::pad16(&prepared);
         let (w, h) = padded.dimensions();
         let inp = self.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.workdir.join(format!("out_{}.png", self.counter));
@@ -68,7 +71,7 @@ impl Inpainter for SdCppInpainter {
             };
             cmd.arg(flag).arg(p);
         }
-        let prompt = self.ps("prompt", "Remove all text.");
+        let prompt = self.prep.prompt.clone();
         let steps = self.pf("steps", 4.0);
         cmd.arg("-p").arg(&prompt).arg("-W").arg(w.to_string()).arg("-H").arg(h.to_string());
         cmd.arg("--steps").arg((steps as u32).to_string());

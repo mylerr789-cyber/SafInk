@@ -19,7 +19,7 @@ pub struct SdnqInpainter {
     counter: u32,
     steps: u32,
     guidance: f64,
-    prompt: String,
+    prep: super::InputPrep,
 }
 
 impl SdnqInpainter {
@@ -32,7 +32,7 @@ impl SdnqInpainter {
             counter: 0,
             steps: pu("steps", 4) as u32,
             guidance: spec.params.get("guidance").and_then(|v| v.as_f64()).unwrap_or(1.0),
-            prompt: spec.params.get("prompt").and_then(|v| v.as_str()).unwrap_or("Remove all text.").to_string(),
+            prep: super::InputPrep::new(paths, spec, settings)?,
         };
         let load = serde_json::json!({
             "cmd": "load",
@@ -51,7 +51,7 @@ impl SdnqInpainter {
 impl Inpainter for SdnqInpainter {
     fn label(&self) -> String { format!("SDNQ · {}", self.spec.name) }
     fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
-    fn inpaint(&mut self, img: &RgbImage, _mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
+    fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
             bail!("iptal edildi");
         }
@@ -59,12 +59,13 @@ impl Inpainter for SdnqInpainter {
         let (w0, h0) = img.dimensions();
         let inp = self.w.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.w.workdir.join(format!("out_{}.png", self.counter));
-        let padded = super::pad16(img);
+        let prepared = self.prep.prepare(img, mask, ctx)?;
+        let padded = super::pad16(&prepared);
         let pd = padded.dimensions();
         padded.save(&inp)?;
         let r = self.w.call(&serde_json::json!({
             "cmd": "edit", "image": inp.to_string_lossy(), "out": outp.to_string_lossy(),
-            "prompt": self.prompt, "steps": self.steps, "guidance": self.guidance, "seed": 1,
+            "prompt": self.prep.prompt, "steps": self.steps, "guidance": self.guidance, "seed": 1,
         }))?;
         if r["ok"] != true {
             bail!("yeniden çizim hatası: {}", r["error"]);

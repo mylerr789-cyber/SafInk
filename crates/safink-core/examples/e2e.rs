@@ -52,6 +52,9 @@ async fn main() -> anyhow::Result<()> {
     }
     let mut s = eng.settings.read().clone();
     s.model_id = model;
+    if let Ok(d) = std::env::var("SAFINK_DILATION") {
+        s.dilation = d.parse()?;
+    }
     eng.set_settings(s)?;
     let cid = eng.quick_new(&images)?;
     let pages = eng.db.pages(cid)?;

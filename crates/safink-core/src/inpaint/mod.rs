@@ -84,3 +84,70 @@ pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
     }
     out
 }
+
+/// Redraw modellerinin girdi hazırlığı (katalog `params.input_mode`):
+/// - `original`: sayfa olduğu gibi gider (maske modele verilmez),
+/// - `green`: maskeli (genişletilmiş) pikseller saf #00FF00 boyanır, komut "yeşil alanları kaldır" der,
+/// - `lama_prefill`: maske önce LaMa ile doldurulur (tam parça, 512 pencereli), Flux yalnızca düzeltir.
+/// Geri yazım (yalnızca maskeli pikseller, tüy) her kipte aynıdır. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
+/// ortam değişkenleri katalog değerinin üstüne yazar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputMode {
+    Original,
+    Green,
+    LamaPrefill,
+}
+
+pub struct InputPrep {
+    pub mode: InputMode,
+    pub prompt: String,
+    lama: Option<Box<dyn Inpainter>>,
+}
+
+impl InputPrep {
+    pub fn new(paths: &AppPaths, spec: &ModelSpec, settings: &Settings) -> Result<Self> {
+        let ps = |k: &str| spec.params.get(k).and_then(|v| v.as_str()).map(str::to_string);
+        let mode_name = std::env::var("SAFINK_INPUT_MODE").ok().or_else(|| ps("input_mode")).unwrap_or_else(|| "original".into());
+        let mode = match mode_name.as_str() {
+            "original" => InputMode::Original,
+            "green" => InputMode::Green,
+            "lama_prefill" => InputMode::LamaPrefill,
+            m => bail!("bilinmeyen input_mode: {m}"),
+        };
+        let key = match mode {
+            InputMode::Original => "prompt",
+            InputMode::Green => "prompt_green",
+            InputMode::LamaPrefill => "prompt_lama_prefill",
+        };
+        let prompt = std::env::var("SAFINK_PROMPT").ok().or_else(|| ps(key)).or_else(|| ps("prompt")).unwrap_or_else(|| "Remove all text.".into());
+        let lama = if mode == InputMode::LamaPrefill {
+            let cat = crate::catalog::Catalog::load(paths);
+            let lspec = cat.get("lama-manga").ok_or_else(|| anyhow::anyhow!("lama-manga kataloğda yok"))?.clone();
+            Some(create(paths, &lspec, settings)?)
+        } else {
+            None
+        };
+        Ok(Self { mode, prompt, lama })
+    }
+
+    /// Modele gidecek görüntü (özgün boyutta; dolgu çağıranda yapılır).
+    pub fn prepare(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
+        match self.mode {
+            InputMode::Original => Ok(img.clone()),
+            InputMode::Green => {
+                let mut o = img.clone();
+                for (x, y, m) in mask.enumerate_pixels() {
+                    if m[0] >= 128 {
+                        o.put_pixel(x, y, image::Rgb([0, 255, 0]));
+                    }
+                }
+                Ok(o)
+            }
+            InputMode::LamaPrefill => {
+                let lama = self.lama.as_mut().expect("lama_prefill için LaMa yüklü");
+                // maske zaten genişletilmiş; LaMa sonucu tüysüz tam doldurma olarak alınır
+                crate::pipeline::clean_image(img, mask, &crate::pipeline::CleanParams { dilation: 0, feather: 0 }, lama.as_mut(), ctx.cancel, &|_, _| {})
+            }
+        }
+    }
+}
