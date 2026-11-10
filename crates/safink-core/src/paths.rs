@@ -8,7 +8,10 @@ pub struct AppPaths {
 
 impl AppPaths {
     pub fn new(root: impl Into<PathBuf>) -> std::io::Result<Self> {
-        let p = Self { root: root.into() };
+        let root: PathBuf = root.into();
+        // mutlak yol: alt süreçler (sd-cli) başka çalışma dizininde başlar
+        let root = std::path::absolute(&root).unwrap_or(root);
+        let p = Self { root };
         for d in [p.masks(), p.edits(), p.cleaned(), p.thumbs(), p.models(), p.tools(), p.work()] {
             std::fs::create_dir_all(d)?;
         }
