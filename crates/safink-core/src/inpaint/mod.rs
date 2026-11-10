@@ -152,7 +152,7 @@ impl InputPrep {
             InputMode::LamaPrefill => {
                 let lama = self.lama.as_mut().expect("lama_prefill için LaMa yüklü");
                 // maske zaten genişletilmiş; LaMa sonucu tüysüz tam doldurma olarak alınır
-                crate::pipeline::clean_image(img, mask, &crate::pipeline::CleanParams { dilation: 0, feather: 0 }, lama.as_mut(), ctx.cancel, &|_, _| {})
+                crate::pipeline::clean_image(img, mask, &crate::pipeline::CleanParams { dilation: 0, feather: 0, flat_fill: false }, lama.as_mut(), ctx.cancel, &|_, _| {})
             }
         }
     }

@@ -257,7 +257,7 @@ impl Engine {
             Some(p) => (p.model_id.clone(), p.confidence, p.dilation, p.feather),
             None => (s.model_id.clone(), s.confidence, s.dilation, s.feather),
         };
-        (crate::settings::migrate_model_id(&mid), conf, CleanParams { dilation, feather })
+        (crate::settings::migrate_model_id(&mid), conf, CleanParams { dilation, feather, flat_fill: s.flat_fill })
     }
 
     async fn ensure_mask(&self, page: &Page, conf: f32, ctl: &JobCtl, on_wait: &(dyn Fn(f64, &str) + Send + Sync)) -> Result<()> {
@@ -320,13 +320,33 @@ impl Engine {
         Ok(maskops::combine(api.as_ref(), edit.as_ref(), page.width as u32, page.height as u32))
     }
 
-    fn clean_page(&self, pid: i64, inp: &mut dyn inpaint::Inpainter, params: &CleanParams, cancel: &AtomicBool, prog: &dyn Fn(usize, usize)) -> Result<()> {
+    /// Düz zeminler önce doldurulur; yalnızca kalan bileşenler varsa model (`make` ile tembel) yüklenir.
+    fn clean_page(&self, pid: i64, inp: &mut Option<Box<dyn inpaint::Inpainter>>, make: &mut dyn FnMut() -> Result<Box<dyn inpaint::Inpainter>>, params: &CleanParams, cancel: &AtomicBool, prog: &dyn Fn(usize, usize)) -> Result<()> {
         let page = self.db.page(pid)?.ok_or_else(|| anyhow!("sayfa yok"))?;
         let img = imgio::load_rgb(Path::new(&page.path))?;
         let mask = self.final_mask(&page)?;
         let (mw, mh) = (img.width(), img.height());
         let mask = if mask.dimensions() != (mw, mh) { image::imageops::resize(&mask, mw, mh, image::imageops::FilterType::Nearest) } else { mask };
-        let out = crate::pipeline::clean_image(&img, &mask, params, inp, cancel, prog)?;
+        let m = maskops::dilate(&mask, params.dilation);
+        let out = if params.flat_fill {
+            let f = crate::pipeline::flat_fill(&img, &m, params.feather, &crate::pipeline::FLAT_CFG);
+            if std::env::var_os("SAFINK_FLAT_LOG").is_some() {
+                eprintln!("[düz doldurma] sayfa {pid}: düz={} model={}", f.stats.flat, f.stats.model);
+            }
+            if f.stats.model == 0 {
+                f.work
+            } else {
+                if inp.is_none() {
+                    *inp = Some(make()?);
+                }
+                crate::pipeline::clean_dilated(&f.work, f.remaining, params, inp.as_mut().unwrap().as_mut(), cancel, prog)?
+            }
+        } else {
+            if inp.is_none() {
+                *inp = Some(make()?);
+            }
+            crate::pipeline::clean_dilated(&img, m, params, inp.as_mut().unwrap().as_mut(), cancel, prog)?
+        };
         imgio::save_png_atomic(&self.paths.cleaned_file(pid), &image::DynamicImage::ImageRgb8(out))?;
         self.db.set_status(pid, "cleaned", "")?;
         self.tiles.invalidate(pid);
@@ -421,23 +441,34 @@ impl Engine {
                         break;
                     }
                     cur2.store(pid as u64, Ordering::Relaxed);
-                    if inp.is_none() {
-                        *msg2.lock() = "model yükleniyor…".into();
-                        mk2("running");
-                        match inpaint::create(&me.paths, &ms, &settings) {
-                            Ok(i) => {
-                                *msg2.lock() = i.label();
-                                inp = Some(i);
-                            }
-                            Err(e) => {
-                                return Err(e);
-                            }
-                        }
-                    }
                     mk2("running");
-                    let r = me.clean_page(pid, inp.as_mut().unwrap().as_mut(), &params2, &ctl2.cancel, &|d, t| {
-                        *msg2.lock() = format!("pencere {d}/{t}");
-                    });
+                    let mut create_err: Option<anyhow::Error> = None;
+                    let r = me.clean_page(
+                        pid,
+                        &mut inp,
+                        &mut || {
+                            *msg2.lock() = "model yükleniyor…".into();
+                            mk2("running");
+                            match inpaint::create(&me.paths, &ms, &settings) {
+                                Ok(i) => {
+                                    *msg2.lock() = i.label();
+                                    Ok(i)
+                                }
+                                Err(e) => {
+                                    create_err = Some(anyhow!("{e}"));
+                                    Err(e)
+                                }
+                            }
+                        },
+                        &params2,
+                        &ctl2.cancel,
+                        &|d, t| {
+                            *msg2.lock() = format!("pencere {d}/{t}");
+                        },
+                    );
+                    if let Some(e) = create_err {
+                        return Err(e);
+                    }
                     match r {
                         Ok(()) => {
                             cleaned2.fetch_add(1, Ordering::Relaxed);

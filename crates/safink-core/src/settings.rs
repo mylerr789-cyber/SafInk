@@ -34,6 +34,8 @@ pub struct Settings {
     pub presets: Vec<Preset>,
     pub hf_token: String,
     pub low_vram: bool,
+    /// Yazı çevresindeki zemin düzse (balon içi) modele gitmeden ortanca renkle doldur.
+    pub flat_fill: bool,
 }
 
 impl Default for Settings {
@@ -55,6 +57,7 @@ impl Default for Settings {
             ],
             hf_token: String::new(),
             low_vram: true,
+            flat_fill: true,
         }
     }
 }

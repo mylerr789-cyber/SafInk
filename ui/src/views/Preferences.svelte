@@ -7,6 +7,7 @@
   import Scrub from '../ui/Scrub.svelte';
   import Select from '../ui/Select.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import Switch from '../ui/Switch.svelte';
 
   let s = $state<Settings | null>(null);
   $effect(() => { if (!s && app.settings) s = structuredClone($state.snapshot(app.settings)); });
@@ -67,6 +68,7 @@
             <div class="prow">{@render row('Varsayılan model', 'Temizlerken kullanılacak model')}<Select bind:value={s.model_id} options={modelOpts} width="320px" /></div>
             <div class="prow">{@render row('Maske genişletme', 'Yazı kenarı kalıyorsa artırın')}<Scrub bind:value={s.dilation} min={0} max={16} unit="px" width="220px" /></div>
             <div class="prow">{@render row('Kenar yumuşatma', 'Temizlenen alanın kenar geçişi')}<Scrub bind:value={s.feather} min={0} max={16} unit="px" width="220px" /></div>
+            <div class="prow">{@render row('Düz zeminleri doğrudan doldur')}<Switch bind:checked={s.flat_fill} /></div>
           {:else if app.prefsTab === 'export'}
             <div class="prow">{@render row('Çıktı klasörü', 'Boş bırakılırsa her seferinde sorulur')}
               <div class="flex gap-2"><input class="field w-[240px] mono text-[12px]" bind:value={s.export_dir} placeholder="her seferinde sor" /><button class="btn" onclick={pickDir}>Seç…</button></div></div>
