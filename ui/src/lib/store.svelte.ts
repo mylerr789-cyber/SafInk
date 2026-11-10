@@ -3,7 +3,8 @@ import { api, type Settings, type JobEvt, type Model, type Hardware, type Page, 
 
 export type Tool = 'hand' | 'zoom' | 'brush' | 'eraser' | 'lasso';
 export type PrefsTab = 'clean' | 'export' | 'models';
-interface Toast { id: number; text: string; kind: 'info' | 'ok' | 'err' }
+interface Toast { id: number; text: string; kind: 'info' | 'ok' | 'err'; action?: { label: string; run: () => void } }
+interface Ask { text: string; ok: string; danger: boolean; resolve: (v: boolean) => void }
 interface DlState { stage: string; done: number; total: number; file: string; phase: string }
 interface Layer { vis: boolean; op: number }
 
@@ -20,6 +21,9 @@ class AppState {
   dl = $state<Record<string, DlState>>({});
   importProg = $state<{ done: number; total: number } | null>(null);
   toasts = $state<Toast[]>([]);
+  asking = $state<Ask | null>(null);
+  help = $state(false);
+  exporting = $state(false);
 
   job = $state<JobEvt | null>(null);
   jobActive = $state(false);
@@ -48,6 +52,8 @@ class AppState {
     orig: { vis: true, op: 1 }, api: { vis: true, op: 0.55 }, edit: { vis: true, op: 0.65 }, result: { vis: true, op: 1 },
   }) as any);
   compare = $state(false); // true: sonucu göster (önce/sonra)
+  split = $state(false); // true: bölünmüş önce/sonra (compare ile birlikte)
+  splitAt = $state(0.5); // bölme çizgisi, sayfa genişliğinin oranı
   opts = $state<Opts>(load('safink.opts', { preset_id: 'fast', model_id: 'lama-manga', confidence: 0.25, dilation: 2, feather: 4 }));
 
   // tuval köprüsü
@@ -68,11 +74,17 @@ class AppState {
 
   get page(): Page | null { return this.pages[this.index] ?? null; }
 
-  toast(text: string, kind: Toast['kind'] = 'info') {
+  toast(text: string, kind: Toast['kind'] = 'info', action?: Toast['action']) {
     const id = this.tid++;
-    this.toasts.push({ id, text, kind });
-    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === 'err' ? 7000 : 3000);
+    this.toasts.push({ id, text, kind, action });
+    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === 'err' ? 7000 : action ? 8000 : 3000);
   }
+  /** Uygulama içi onay kutusu (tarayıcı confirm'i yerine). */
+  ask(text: string, ok = 'Sil', danger = true): Promise<boolean> {
+    this.asking?.resolve(false);
+    return new Promise((resolve) => (this.asking = { text, ok, danger, resolve }));
+  }
+  answer(v: boolean) { const a = this.asking; this.asking = null; a?.resolve(v); }
   saveOpts() { try { localStorage.setItem('safink.opts', JSON.stringify($state.snapshot(this.opts))); localStorage.setItem('safink.layers', JSON.stringify($state.snapshot(this.layers))); } catch {} }
 
   async reloadSettings() {
@@ -127,24 +139,67 @@ class AppState {
     } catch (e) { this.toast(String(e), 'err'); }
   }
 
-  async run(mode: 'fetch' | 'clean', scope: 'page' | 'selection' | 'chapter') {
+  async run(mode: 'fetch' | 'clean', scope: 'page' | 'selection' | 'chapter' | 'errors') {
     if (!this.project) return;
     await this.cv?.flush();
     let ids: number[];
     if (scope === 'page') ids = this.page ? [this.page.id] : [];
+    else if (scope === 'errors') ids = this.pages.filter((p) => this.statusOf(p) === 'error').map((p) => p.id);
     else if (scope === 'selection' && this.selected.length) ids = this.pages.filter((p) => this.selected.includes(p.id)).map((p) => p.id);
     else ids = this.pages.map((p) => p.id);
     try { await api.startJob({ page_ids: ids, mode, force: scope !== 'chapter', preset: this.presetFromOpts() }); } catch (e) { this.toast(String(e), 'err'); }
   }
   async exportChapter(onlySelected = false) {
+    if (this.exporting) return;
+    const list = onlySelected && this.selected.length ? this.pages.filter((p) => this.selected.includes(p.id)) : this.pages;
+    const ready = list.filter((p) => this.statusOf(p) === 'cleaned').length;
+    if (!ready) { this.toast('Dışa aktarılacak temiz sayfa yok. Önce sayfaları temizleyin.', 'err'); return; }
+    const skip = list.length - ready;
+    if (skip && !(await this.ask(`${ready} temiz sayfa aktarılacak. ${skip} sayfa henüz temiz değil, atlanacak.`, 'Aktar', false))) return;
     let dir = this.settings?.export_dir;
     if (!dir) { const d = await pick({ directory: true, title: 'Çıktı klasörü' }); if (!d) return; dir = d as string; }
-    const ids = (onlySelected && this.selected.length ? this.pages.filter((p) => this.selected.includes(p.id)) : this.pages).map((p) => p.id);
+    this.exporting = true;
     try {
-      const r = await api.exportPages(ids, dir);
-      this.toast(`${r.ok} sayfa dışa aktarıldı${r.skipped ? ` · ${r.skipped} atlandı (temiz değil)` : ''}`, 'ok');
-      api.revealPath(r.dir);
+      const r = await api.exportPages(list.map((p) => p.id), dir);
+      this.toast(`${r.ok} sayfa dışa aktarıldı${r.skipped ? ` · ${r.skipped} atlandı` : ''}`, 'ok', { label: 'Klasörü aç', run: () => api.revealPath(r.dir) });
     } catch (e) { this.toast(String(e), 'err'); }
+    this.exporting = false;
+  }
+  async deletePage(id: number) {
+    const p = this.pages.find((x) => x.id === id);
+    if (!p || !(await this.ask(`"${p.name}" bölümden kaldırılsın? Orijinal dosyaya dokunulmaz.`))) return;
+    await this.cv?.flush();
+    try {
+      await api.deletePage(id);
+      const keep = this.index;
+      this.selected = this.selected.filter((x) => x !== id);
+      this.pages = await api.listPages(this.project!.chapterId);
+      this.index = Math.max(0, Math.min(keep, this.pages.length - 1));
+      this.toast('Sayfa kaldırıldı');
+    } catch (e) { this.toast(String(e), 'err'); }
+  }
+  async deleteSelected() {
+    const ids = [...this.selected];
+    if (ids.length === 1) return this.deletePage(ids[0]);
+    if (!ids.length || !(await this.ask(`${ids.length} sayfa bölümden kaldırılsın? Orijinal dosyalara dokunulmaz.`))) return;
+    await this.cv?.flush();
+    try {
+      const keep = this.index;
+      for (const id of ids) await api.deletePage(id);
+      this.selected = [];
+      this.pages = await api.listPages(this.project!.chapterId);
+      this.index = Math.max(0, Math.min(keep, this.pages.length - 1));
+      this.toast(`${ids.length} sayfa kaldırıldı`);
+    } catch (e) { this.toast(String(e), 'err'); }
+  }
+  async renameChapter(id: number, name: string) {
+    name = name.trim();
+    if (!name) return false;
+    try {
+      await api.renameChapter(id, name);
+      if (this.project?.chapterId === id) this.project.name = name;
+      return true;
+    } catch (e) { this.toast(String(e), 'err'); return false; }
   }
 
   async init() {
@@ -168,7 +223,7 @@ class AppState {
             this.tick++;
             this.reloadPages();
             if (e.state === 'error') this.toast(e.message, 'err');
-            else if (e.state === 'done') this.toast('İş tamamlandı', 'ok');
+            else if (e.state === 'done') this.toast(e.failed ? `Bitti: ${e.total - e.failed} sayfa tamam, ${e.failed} hata` : `Bitti: ${e.total} sayfa işlendi`, e.failed ? 'info' : 'ok');
             else if (e.state === 'cancelled') this.toast('İş iptal edildi');
           }
           break;

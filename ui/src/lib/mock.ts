@@ -41,6 +41,8 @@ const pages = (meta as any[]).map((m, i) => ({
   detections: statuses[i] === 'new' ? 0 : m.det, rev: 1,
 }));
 const edits = new Map<string, Uint8Array>();
+const removed = new Set<number>(); // silinen sayfa id'leri (mock)
+const live = () => pages.filter((p) => !removed.has(p.id));
 
 const imgCache = new Map<string, Promise<ImageBitmap | null>>();
 function bitmap(n: string) {
@@ -143,9 +145,13 @@ export async function invoke(cmd: string, a: any = {}, opts?: any): Promise<any>
     case 'get_settings': return structuredClone(settings);
     case 'save_settings': Object.assign(settings, a.settings); return;
     case 'list_manga': return structuredClone(mangas);
-    case 'create_manga': return 1;
+    case 'create_manga': { const f = mangas.find((m) => m.name === a.name); if (f) return f.id; const id = Math.max(...mangas.map((m) => m.id)) + 1; mangas.push({ id, name: a.name, chapters: 0 }); return id; }
+    case 'rename_chapter': { const c = chapters.find((x) => x.id === a.id); if (c) c.name = a.name; return; }
+    case 'delete_chapter': { const i = chapters.findIndex((x) => x.id === a.id); if (i >= 0) { const m = mangas.find((x) => x.id === chapters[i].manga_id); if (m) m.chapters--; chapters.splice(i, 1); } return; }
+    case 'delete_manga': { const i = mangas.findIndex((x) => x.id === a.id); if (i >= 0) mangas.splice(i, 1); for (let k = chapters.length - 1; k >= 0; k--) if (chapters[k].manga_id === a.id) chapters.splice(k, 1); return; }
+    case 'delete_page': { await new Promise((r) => setTimeout(r, 150)); removed.add(a.id); const c = chapters.find((x) => x.id === 11); if (c) c.pages = live().length; return; }
     case 'list_chapters': return chapters.filter((c) => c.manga_id === a.mangaId);
-    case 'list_pages': return a.chapterId === 11 ? structuredClone(pages) : covers[a.chapterId] != null ? [structuredClone(pages[covers[a.chapterId]])] : [];
+    case 'list_pages': return a.chapterId === 11 ? structuredClone(live()).map((p, i) => ({ ...p, idx: i })) : covers[a.chapterId] != null ? [structuredClone(pages[covers[a.chapterId]])] : [];
     case 'get_page': return structuredClone(pages[a.id - 1] ?? null);
     case 'quick_new': return 11;
     case 'import_folder': return [11];
@@ -164,7 +170,7 @@ export async function invoke(cmd: string, a: any = {}, opts?: any): Promise<any>
     case 'install_model': simInstall(a.id); return;
     case 'cancel_install': { const t = timers.get(a.id); if (t) { clearInterval(t); timers.delete(a.id); emit({ type: 'download', model_id: a.id, file: 'iptal edildi', file_done: 0, file_total: 0, done: 0, total: 0, stage: 'error', phase: '' }); } return; }
     case 'remove_model': installedSet.delete(a.id); return;
-    case 'export_pages': return { ok: 2, skipped: 5, dir: 'C:/out' };
+    case 'export_pages': { await new Promise((r) => setTimeout(r, 1200)); const ok = a.pageIds.filter((id: number) => pages[id - 1]?.status === 'cleaned').length; return { ok, skipped: a.pageIds.length - ok, dir: 'C:/out' }; }
     default: return;
   }
 }

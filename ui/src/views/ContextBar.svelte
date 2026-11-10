@@ -12,6 +12,8 @@
     zoom: { icon: ZoomIn, name: 'Büyüteç', hint: 'tıkla · Alt: uzaklaş' },
   } as const;
   const m = $derived(meta[app.tool]);
+  const cmp = $derived(!app.compare ? 'mask' : app.split ? 'split' : 'result');
+  function setCmp(v: string) { app.compare = v !== 'mask'; app.split = v === 'split'; }
   const drawing = $derived(app.tool === 'brush' || app.tool === 'eraser');
   let maskOp = $state(app.layers.api.op);
   function setOp(v: number) { app.layers.api.op = v; app.layers.edit.op = Math.min(1, v + 0.1); app.saveOpts(); }
@@ -41,8 +43,8 @@
   </div>
   {#if app.hasClean}
     <div class="flex items-center px-2 border-r-[1.5px] border-ink">
-      <Segmented bind:value={app.compare} compact options={[{ value: false, label: 'Maske', tip: 'C' }, { value: true, label: 'Sonuç', tip: 'C · \\ basılı: orijinal' }]} />
+      <Segmented value={cmp} onchange={setCmp} compact options={[{ value: 'mask', label: 'Maske', tip: 'C' }, { value: 'split', label: 'Önce | Sonra', tip: 'çizgiyi sürükle' }, { value: 'result', label: 'Sonuç', tip: 'C · \\ basılı: orijinal' }]} />
     </div>
   {/if}
-  <div class="flex-1 flex items-center justify-end px-3.5 mono text-[11px] muted truncate">{m.hint}</div>
+  <div class="flex-1 min-w-0 flex items-center justify-end px-3.5 mono text-[11px] muted truncate max-[1500px]:hidden">{m.hint}</div>
 </div>

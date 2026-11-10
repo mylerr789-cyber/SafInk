@@ -26,7 +26,11 @@
     } catch (e) { app.toast(String(e), 'err'); }
   }
   async function pickDir() { const d = await pick({ directory: true }); if (d && s) s.export_dir = d as string; }
-  const close = () => (app.dialog = null);
+  async function close() {
+    if (app.asking) return;
+    if (dirty && !(await app.ask('Kaydedilmemiş değişiklikler var. Kapatılsın mı?', 'Kapat'))) return;
+    app.dialog = null;
+  }
   const modelOpts = $derived(app.models.map((m) => ({ value: m.id, label: m.name, hint: m.installed ? 'kurulu' : 'kurulu değil', mark: (m.installed ? 'ok' : 'off') as 'ok' | 'off' })));
   const cur = $derived(tabs.find((t) => t.id === app.prefsTab)!);
 </script>

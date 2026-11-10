@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Plus, X } from 'lucide-svelte';
+  import { Plus, X, Trash2, RefreshCw } from 'lucide-svelte';
   import { app } from '../lib/store.svelte';
   import { thumbUrl } from '../lib/api';
   import { importPages } from '../lib/actions';
@@ -57,6 +57,9 @@
           style="aspect-ratio:{Math.max(0.5, Math.min(1, p.width / p.height))}">
           <img src={thumbUrl(p.id, app.revOf(p))} alt="" loading="lazy" draggable="false" class="w-full h-full object-cover object-top" />
         </div>
+        {#if app.jobActive && app.job?.current === p.id}<span class="absolute left-1.5 top-1.5 tag tag-ink animate-pulse">işleniyor</span>{/if}
+        <span class="absolute left-0 top-0 w-7 h-7 grid place-items-center bg-ink text-paper hover:bg-red opacity-0 group-hover:opacity-100 cursor-pointer" role="button" tabindex="-1" aria-label="Sayfayı kaldır" data-tip="Bölümden kaldır  Del" data-tip-side="right"
+          onclick={(e) => { e.stopPropagation(); app.deletePage(p.id); }} onkeydown={() => {}}><Trash2 size={13} /></span>
         {#if st === 'cleaned'}<span class="absolute -right-2 top-2.5"><Stamp size={46} /></span>
         {:else if st === 'error'}<span class="absolute -right-1.5 top-3"><Stamp kind="error" size={46} /></span>{/if}
         <div class="mt-2 flex items-center justify-between gap-2">
@@ -70,12 +73,19 @@
     {#if !app.pages.length}<div class="muted text-[12px] p-2 text-center">Sayfa yok</div>{/if}
   </div>
 
+  {#if counts.error && !app.selected.length}
+    <div class="shrink-0 border-t-[2.5px] border-ink p-2.5 flex flex-col gap-2 slidein">
+      <div class="mono font-semibold text-[12px] text-red">{pad(counts.error)} HATA</div>
+      <button class="btn btn-sm" disabled={app.jobActive} onclick={() => app.run('clean', 'errors')}><RefreshCw size={13} /> Hatalıları yeniden dene</button>
+    </div>
+  {/if}
   {#if app.selected.length}
     <div class="shrink-0 border-t-[2.5px] border-ink p-2.5 flex flex-col gap-2 slidein">
       <div class="flex items-center"><span class="mono font-semibold text-[12px] text-blue">{pad(app.selected.length)} SEÇİLİ</span><div class="flex-1"></div>
         <button class="btn btn-sm btn-icon btn-bare !h-6 !w-6" aria-label="Seçimi kaldır" onclick={() => (app.selected = [])}><X size={14} /></button></div>
       <button class="btn btn-sm btn-ink" disabled={app.jobActive} onclick={() => app.run('clean', 'selection')}>Seçilenleri temizle</button>
       <button class="btn btn-sm" onclick={() => app.exportChapter(true)}>Dışa aktar</button>
+      <button class="btn btn-sm btn-danger" onclick={() => app.deleteSelected()}><Trash2 size={13} /> Bölümden kaldır</button>
     </div>
   {/if}
 </aside>

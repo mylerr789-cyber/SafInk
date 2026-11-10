@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Upload, Pause, Play, X, PanelLeft, PanelRight } from 'lucide-svelte';
+  import { Upload, Pause, Play, X, PanelLeft, PanelRight, Pencil } from 'lucide-svelte';
   import { app } from '../lib/store.svelte';
   import { api } from '../lib/api';
   import { importChapterFolder, importPages, resetPageEdits } from '../lib/actions';
@@ -46,10 +46,23 @@
       { label: 'Seçilenleri temizle', run: () => app.run('clean', 'selection'), disabled: !has || busy || !app.selected.length },
       { label: 'Bölümü temizle', kbd: 'Ctrl ⇧ ↵', run: () => app.run('clean', 'chapter'), disabled: !has || busy },
       { sep: true },
+      { label: 'Hatalı sayfaları yeniden dene', run: () => app.run('clean', 'errors'), disabled: !has || busy || !app.pages.some((p) => app.statusOf(p) === 'error') },
       { label: 'İşi durdur', run: () => api.cancelJob(), disabled: !busy },
+    ],
+    Yardım: [
+      { label: 'Kısayollar', kbd: '?', run: () => (app.help = true) },
+      { label: 'Modeller…', run: () => { app.prefsTab = 'models'; app.dialog = 'prefs'; } },
     ],
   });
   let jobsOpen = $state(false);
+  let renaming = $state(false);
+  let nameDraft = $state('');
+  function startRename() { if (!app.project || app.project.quick) return; nameDraft = app.project.name; renaming = true; }
+  async function commitRename() {
+    if (!renaming || !app.project) return;
+    renaming = false;
+    if (nameDraft.trim() && nameDraft.trim() !== app.project.name) await app.renameChapter(app.project.chapterId, nameDraft);
+  }
   const j = $derived(app.job);
   const doneN = $derived(j ? (j.mode === 'clean' ? j.cleaned : j.fetched) : 0);
   const frac = $derived(j && j.total ? Math.min(1, (doneN + j.failed) / j.total) : 0);
@@ -90,7 +103,15 @@
       <button class="disp text-[22px] leading-none bg-sheet px-1.5 py-1 truncate min-w-0 hover:bg-ink hover:text-paper" onclick={() => (app.dialog = 'start')}>
         {app.project.quick ? 'Hızlı temizlik' : app.project.manga}
       </button>
-      {#if !app.project.quick}<span class="tag bg-sheet !h-[24px] !px-2 !text-[12.5px] shrink-0">{app.project.name}</span>{/if}
+      {#if !app.project.quick}
+        {#if renaming}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="field !h-[26px] !w-[170px] !px-2 !text-[12.5px] font-semibold shrink-0" bind:value={nameDraft} autofocus onfocus={(e) => (e.currentTarget as HTMLInputElement).select()} onblur={commitRename}
+            onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') renaming = false; }} />
+        {:else}
+          <button class="tag bg-sheet !h-[24px] !px-2 !text-[12.5px] shrink-0 max-w-[150px] truncate hover:bg-ink hover:text-paper" onclick={startRename} data-tip="Bölüm adını değiştir">{app.project.name}<Pencil size={11} /></button>
+        {/if}
+      {/if}
       {#if app.pages.length}<span class="ml-auto mono font-semibold text-[15px] bg-sheet px-2 shrink-0">P.{pad(app.index + 1)} / {pad(app.pages.length)}</span>{/if}
     {/if}
   </div>
@@ -136,7 +157,7 @@
     <button class="btn btn-sm btn-icon btn-bare {app.pagesOpen ? '' : 'opacity-40'}" onclick={() => (app.pagesOpen = !app.pagesOpen)} data-tip="Sayfa paneli  Ctrl [" aria-label="Sayfa paneli"><PanelLeft size={16} /></button>
     <button class="btn btn-sm btn-icon btn-bare {app.inspectorOpen ? '' : 'opacity-40'}" onclick={() => (app.inspectorOpen = !app.inspectorOpen)} data-tip="Denetçi  Tab" aria-label="Denetçi"><PanelRight size={16} /></button>
   </div>
-  <button class="flex items-center gap-2 px-5 bg-ink text-paper font-bold border-l-[2.5px] border-ink hover:bg-[#2b2b2b] disabled:opacity-60" disabled={!has} onclick={() => app.exportChapter(false)} data-tip="Temiz sayfaları dışa aktar  Ctrl E">
-    <Upload size={16} strokeWidth={2.25} /> Dışa aktar
+  <button class="flex items-center gap-2 px-5 bg-ink text-paper font-bold border-l-[2.5px] border-ink hover:bg-[#2b2b2b] disabled:opacity-60" disabled={!has || app.exporting} onclick={() => app.exportChapter(false)} data-tip="Temiz sayfaları dışa aktar  Ctrl E">
+    <Upload size={16} strokeWidth={2.25} class={app.exporting ? 'animate-pulse' : ''} /> {app.exporting ? 'Aktarılıyor…' : 'Dışa aktar'}
   </button>
 </header>

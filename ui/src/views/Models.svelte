@@ -25,7 +25,7 @@
     } catch (e) { delete app.dl[m.id]; app.toast(String(e), 'err'); }
   }
   async function remove(m: Model) {
-    if (!confirm(`"${m.name}" silinsin? ${fmtBytes(m.total_bytes)} yer açılır.`)) return;
+    if (!(await app.ask(`"${m.name}" diskten silinsin? ${fmtBytes(m.total_bytes)} yer açılır.`))) return;
     try { await api.removeModel(m.id); delete app.dl[m.id]; await app.reloadModels(); } catch (e) { app.toast(String(e), 'err'); }
   }
   async function use(m: Model) {

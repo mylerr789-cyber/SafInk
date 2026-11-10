@@ -22,3 +22,6 @@ ui/mockup.html
 
 # test sonuçları (telifli sayfalar)
 docs/test-results/
+
+# arayüz inceleme ekran görüntüleri (telifli mock sayfalar)
+docs/ui-review/

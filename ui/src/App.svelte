@@ -8,6 +8,8 @@
   import Inspector from './views/Inspector.svelte';
   import Home from './views/Home.svelte';
   import Preferences from './views/Preferences.svelte';
+  import Confirm from './ui/Confirm.svelte';
+  import Help from './ui/Help.svelte';
 
   onMount(() => {
     app.init();
@@ -39,8 +41,10 @@
       else if (k === 'a') { app.selected = app.pages.map((p) => p.id); e.preventDefault(); }
       return;
     }
-    if (app.dialog) return;
-    if (k === 'b') app.tool = 'brush';
+    if (e.key === '?' || e.key === 'F1') { app.help = !app.help; e.preventDefault(); return; }
+    if (app.dialog || app.help) return;
+    if (k === 'delete' && app.project && app.page) { if (app.selected.length) app.deleteSelected(); else app.deletePage(app.page.id); e.preventDefault(); }
+    else if (k === 'b') app.tool = 'brush';
     else if (k === 'e') app.tool = 'eraser';
     else if (k === 'h') app.tool = 'hand';
     else if (k === 'z') app.tool = 'zoom';
@@ -78,6 +82,8 @@
 
 {#if showHome}<Home />{/if}
 {#if app.dialog === 'prefs'}<Preferences />{/if}
+{#if app.help}<Help />{/if}
+<Confirm />
 
 {#if app.dragging}
   <div class="fixed inset-0 z-[200] pointer-events-none p-4 bg-paper/70 fade-in">
@@ -95,6 +101,7 @@
     <div class="slidein pointer-events-auto flex items-center gap-2.5 pl-2 pr-4 py-2 max-w-[560px] bg-sheet border-2 {t.kind === 'err' ? 'border-red shadow-[4px_4px_0_var(--color-red)]' : 'border-ink shadow-[4px_4px_0_var(--color-ink)]'}">
       <span class="tag {t.kind === 'err' ? 'tag-red' : t.kind === 'ok' ? 'tag-ink' : ''}">{t.kind === 'err' ? 'HATA' : t.kind === 'ok' ? 'TAMAM' : 'NOT'}</span>
       <span class="select-text font-medium">{t.text}</span>
+      {#if t.action}<button class="ml-2 font-semibold underline decoration-2 underline-offset-2 hover:text-red" onclick={() => { t.action?.run(); app.toasts = app.toasts.filter((x) => x.id !== t.id); }}>{t.action.label}</button>{/if}
     </div>
   {/each}
 </div>

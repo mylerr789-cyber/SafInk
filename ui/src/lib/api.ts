@@ -33,6 +33,7 @@ export const api = {
   createManga: (name: string) => invoke<number>('create_manga', { name }),
   deleteManga: (id: number) => invoke<void>('delete_manga', { id }),
   listChapters: (mangaId: number) => invoke<Chapter[]>('list_chapters', { mangaId }),
+  renameChapter: (id: number, name: string) => invoke<void>('rename_chapter', { id, name }),
   deleteChapter: (id: number) => invoke<void>('delete_chapter', { id }),
   listPages: (chapterId: number) => invoke<Page[]>('list_pages', { chapterId }),
   getPage: (id: number) => invoke<Page | null>('get_page', { id }),

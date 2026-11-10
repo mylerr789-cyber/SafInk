@@ -44,7 +44,7 @@ export async function quickFromPicker(kind: 'folder' | 'files') {
 }
 
 export async function resetPageEdits() {
-  if (!app.page || !confirm('Bu sayfadaki elle düzenlemeler silinsin? (API maskesi korunur)')) return;
+  if (!app.page || !(await app.ask('Bu sayfadaki elle düzeltmeler silinsin? Otomatik maske korunur.'))) return;
   await app.cv?.flush();
   await api.resetEdits(app.page.id);
   app.cv?.reloadAll();

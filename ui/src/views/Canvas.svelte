@@ -18,6 +18,8 @@
 
   let host: HTMLDivElement;
   let px: Application | null = null;
+  let maskR: Graphics, maskO: Graphics;
+  let hostH = $state(0);
   let world: Container, baseC: Container, resC: Container, overC: Container, ring: Graphics, checker: TilingSprite | null = null, frame: Graphics;
   let tiles = new Map<string, T>();
   let nx = 0, ny = 0;
@@ -198,12 +200,34 @@
     const L = app.layers, showRes = resultShown();
     baseC.visible = L.orig.vis; baseC.alpha = L.orig.op;
     resC.visible = showRes; resC.alpha = L.result.op;
-    overC.visible = !showRes;
+    overC.visible = !showRes || app.split;
+    applySplit();
     for (const t of tiles.values()) redraw(t);
     scheduleVisible();
   }
+  // önce | sonra: sonuç çizginin sağında, maske/orijinal solunda
+  const splitOn = $derived(app.compare && app.split && app.hasClean && app.layers.result.vis && !!app.page);
+  function applySplit() {
+    if (!resC || !cur) return;
+    if (!(resultShown() && app.split)) { resC.mask = null; overC.mask = null; return; }
+    const x = app.splitAt * cur.width;
+    maskR.clear().rect(x, 0, cur.width - x, cur.height).fill(0xffffff);
+    maskO.clear().rect(0, 0, x, cur.height).fill(0xffffff);
+    resC.mask = maskR; overC.mask = maskO;
+  }
+  $effect(() => { app.splitAt; untrack(applySplit); });
+  let splitDrag = false;
+  const divX = $derived(app.view.x + app.splitAt * (app.page?.width ?? 0) * app.view.s);
+  const divTop = $derived(Math.max(0, app.view.y));
+  const divBot = $derived(Math.min(hostH, app.view.y + (app.page?.height ?? 0) * app.view.s));
+  function splitMove(e: PointerEvent) {
+    if (!splitDrag || !cur) return;
+    const [sx] = local(e);
+    app.splitAt = Math.min(1, Math.max(0, (sx - world.x) / world.scale.x / cur.width));
+  }
   $effect(() => {
     const L = app.layers;
+    app.split;
     L.orig.vis; L.orig.op; L.api.vis; L.api.op; L.edit.vis; L.edit.op; L.result.vis; L.result.op; app.compare;
     untrack(applyLayers);
   });
@@ -409,7 +433,8 @@
     await px.init({ resizeTo: host, backgroundAlpha: 0, antialias: true, resolution: window.devicePixelRatio || 1, autoDensity: true, preference: 'webgl' });
     host.appendChild(px.canvas);
     world = new Container(); baseC = new Container(); resC = new Container(); overC = new Container();
-    world.addChild(baseC, resC, overC);
+    maskR = new Graphics(); maskO = new Graphics();
+    world.addChild(baseC, resC, overC, maskR, maskO);
     frame = new Graphics();
     px.stage.addChild(frame, world);
     ring = new Graphics(); px.stage.addChild(ring);
@@ -430,6 +455,7 @@
 <div
   class="absolute inset-0 overflow-hidden"
   bind:this={host}
+  bind:clientHeight={hostH}
   onpointerdown={onDown}
   onpointermove={onMove}
   onpointerup={onUp}
@@ -439,6 +465,18 @@
   oncontextmenu={(e) => e.preventDefault()}
   style="touch-action:none"
 >
+  {#if splitOn && ready}
+    <div class="absolute z-10 pointer-events-none" style="left:{divX - 1}px; top:{divTop}px; height:{Math.max(0, divBot - divTop)}px; width:2px; background:var(--color-ink); box-shadow:0 0 0 1px #fff"></div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="absolute z-20 w-[26px] h-[44px] -ml-[13px] bg-ink text-paper grid place-items-center cursor-ew-resize shadow-[3px_3px_0_#fff] border-2 border-paper"
+      style="left:{divX}px; top:{Math.min(Math.max(divTop + 20, hostH / 2 - 22), Math.max(divTop + 20, divBot - 64))}px"
+      onpointerdown={(e) => { e.stopPropagation(); splitDrag = true; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); }}
+      onpointermove={splitMove} onpointerup={() => (splitDrag = false)} onpointercancel={() => (splitDrag = false)}>
+      <span class="mono text-[13px] font-bold leading-none">◂▸</span>
+    </div>
+    <span class="absolute z-10 tag tag-ink pointer-events-none" style="left:{Math.max(8, divX - 62)}px; top:{divTop + 8}px">ÖNCE</span>
+    <span class="absolute z-10 tag bg-sheet pointer-events-none" style="left:{divX + 8}px; top:{divTop + 8}px">SONRA</span>
+  {/if}
   {#if app.page && !ready}<div class="absolute inset-0 grid place-items-center pointer-events-none"><span class="mono font-semibold bg-sheet border-[1.5px] border-ink px-2 py-1">yükleniyor…</span></div>{/if}
   {#if !app.page && app.project}<div class="absolute inset-0 grid place-items-center pointer-events-none"><span class="bg-sheet border-[1.5px] border-ink px-3 py-2 font-medium">Bu bölümde sayfa yok — soldaki + ile ekleyin.</span></div>{/if}
 </div>
