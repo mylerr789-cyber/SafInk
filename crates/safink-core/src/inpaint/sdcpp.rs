@@ -51,7 +51,7 @@ impl Inpainter for SdCppInpainter {
         self.counter += 1;
         let (w0, h0) = img.dimensions();
         let prepared = self.prep.prepare(img, mask, ctx)?;
-        let padded = super::pad16(&prepared);
+        let padded = super::pad_for(&prepared, &self.spec.params);
         let (w, h) = padded.dimensions();
         let inp = self.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.workdir.join(format!("out_{}.png", self.counter));
@@ -67,6 +67,7 @@ impl Inpainter for SdCppInpainter {
                 "clip_l" => "--clip_l",
                 "t5xxl" => "--t5xxl",
                 "llm" => "--llm",
+                "llm_vision" => "--llm_vision",
                 _ => continue,
             };
             cmd.arg(flag).arg(p);
@@ -78,6 +79,9 @@ impl Inpainter for SdCppInpainter {
         cmd.arg("--cfg-scale").arg(self.pf("cfg", 1.0).to_string());
         if self.spec.params.get("guidance").is_some() {
             cmd.arg("--guidance").arg(self.pf("guidance", 3.5).to_string());
+        }
+        if let Some(sig) = self.spec.params.get("sigmas").and_then(|v| v.as_str()) {
+            cmd.arg("--sigmas").arg(sig); // sabit adım çizelgesi (Qwen-Image 2.1 Turbo: "qwen-image-2.1-turbo")
         }
         cmd.arg("--sampling-method").arg(self.ps("sampler", "euler"));
         cmd.arg("--seed").arg("1");

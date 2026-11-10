@@ -63,6 +63,12 @@ pub fn pad16(img: &RgbImage) -> RgbImage {
     let r = |v: u32| ((v + 15) / 16 * 16).max(64);
     pad_rgb(img, r(img.width()), r(img.height()))
 }
+/// Dolgu katı katalog `params.multiple` (varsayılan 16; Qwen-Image 2.1 için 32).
+pub fn pad_for(img: &RgbImage, params: &serde_json::Value) -> RgbImage {
+    let m = params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(16).max(1) as u32;
+    let r = |v: u32| ((v + m - 1) / m * m).max(64);
+    pad_rgb(img, r(img.width()), r(img.height()))
+}
 /// Model çıktısını dolgusuz özgün boyuta kırpar; beklenmeyen boyutta hata (ölçekleme yapılmaz).
 pub fn crop_to(out: RgbImage, w: u32, h: u32, padded: (u32, u32)) -> Result<RgbImage> {
     if out.dimensions() != padded {

@@ -66,7 +66,7 @@ pub fn migrate_model_id(id: &str) -> String {
         "lama-carve-fp32" => "lama-big".into(),
         "sdcpp-flux2-klein-4b-q4" | "sdcpp-flux2-klein-4b-q8" => "sdcpp-flux2-klein-4b".into(),
         "sdnq-flux2-klein-4b" => id.into(),
-        x if x.starts_with("lama-") || x.starts_with("sdcpp-flux2") || x.starts_with("sdnq-flux2") => x.into(),
+        x if x.starts_with("lama-") || x.starts_with("sdcpp-") || x.starts_with("sdnq-") => x.into(),
         _ => "lama-manga".into(),
     }
 }

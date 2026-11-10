@@ -57,7 +57,7 @@
       return [
         ['Motor', 'sd.cpp'],
         ['Bu PC’de', where],
-        ['Nicemleme', 'GGUF Q4_K_M'],
+        ['Nicemleme', p.quant ?? 'GGUF Q4_K_M'],
         ['Adım', String(p.steps ?? '—')],
         ['VRAM', vram],
         ['RAM', ram],
@@ -67,7 +67,7 @@
       return [
         ['Motor', 'SDNQ · diffusers'],
         ['Bu PC’de', 'GPU · CUDA'],
-        ['Nicemleme', '4-bit dinamik'],
+        ['Nicemleme', p.quant ?? '4-bit dinamik'],
         ['Adım', String(p.steps ?? '—')],
         ['VRAM', vram],
         ['RAM', ram],

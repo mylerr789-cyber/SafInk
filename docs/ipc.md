@@ -58,4 +58,5 @@ Windows: `http://safink.localhost/…`, diğerleri: `safink://localhost/…` (CO
 - Son maske = (API ∪ eklenen) − silinen; `dilation` çalışma anında uygulanır (sayfada saklanmaz).
 - LaMa arka ucu otomatik: NVIDIA GPU → PyTorch (yönetilen Python ortamı, kalıcı worker); aksi halde ONNX CPU. DirectML kullanılmaz. Kullanıcı seçmez.
 - Redraw modellerinde adım/guidance/komut katalog `params` içindedir (ayar değil). MangaTranslator gibi: kırpıntı referans görüntü + sabit komut; maske yalnızca geri yazmada kullanılır (yeşil boyama/"Remove the green areas" MangaTranslator kaynağında yoktur).
+- Qwen-Image 2.1 Turbo (`sdcpp-qwen-image-2-1-turbo`, `sdnq-qwen-image-2-1-turbo`): MangaTranslator ile aynı dosyalar/ayarlar. sd.cpp: `--sigmas qwen-image-2.1-turbo` (sabit 8 adım), cfg 1, euler, `--llm_vision` (mmproj) ve `--offload-to-cpu`; SDNQ: `QwenImage21Pipeline`, adım/guidance geçilmez, `output_resolution=sqrt(w*h)`, VAE döşemeli. Çözünürlük 32'nin katı (`params.multiple`), dolgu ile; ölçekleme yok. Lisans: Qwen Research (ticari olmayan).
 - `Settings` artık `api_base`, `provider`, `sdcpp_variant`, `redraw_prompt`, `redraw_steps` içermez; `Preset` `prompt/steps` içermez.

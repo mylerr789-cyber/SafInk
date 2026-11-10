@@ -166,6 +166,7 @@
     "guidance": 1.0,
     "sampler": "euler",
     "offload": true,
+    "quant": "GGUF Q4_K_M",
     "max_width": 2048,
     "input_mode": "green",
     "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.",
@@ -215,6 +216,7 @@
     "pipeline": "Flux2KleinPipeline",
     "steps": 4,
     "guidance": 1.0,
+    "quant": "4-bit dinamik",
     "max_width": 2048,
     "input_mode": "green",
     "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.",
@@ -364,6 +366,199 @@
      "url": "https://huggingface.co/Disty0/FLUX.2-klein-4B-SDNQ-4bit-dynamic/resolve/main/model_index.json",
      "sha256": null,
      "size": 498,
+     "only": ""
+    }
+   ]
+  },
+  {
+   "id": "sdcpp-qwen-image-2-1-turbo",
+   "name": "Qwen-Image 2.1 Turbo",
+   "backend": "sdcpp",
+   "kind": "redraw",
+   "mode": "edit",
+   "description": "Qwen-Image 2.1 Turbo ile yazı yerini çevresine uygun yeniden çizer; Klein'dan ağır ve yavaş.",
+   "license": "Qwen Research (ticari olmayan)",
+   "license_url": "https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
+   "min_vram_gb": 12,
+   "min_ram_gb": 24,
+   "notes": "Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~50 sn, en çok ~14 GB VRAM.",
+   "params": {
+    "steps": 8,
+    "cfg": 1.0,
+    "guidance": 1.0,
+    "sampler": "euler",
+    "offload": true,
+    "sigmas": "qwen-image-2.1-turbo",
+    "multiple": 32,
+    "max_width": 2048,
+    "input_mode": "green",
+    "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.",
+    "prompt_green": "Remove the green areas and restore the artwork underneath, matching the surrounding lines and screentone. Do not add any text.",
+    "prompt_lama_prefill": "Clean manga artwork. Keep everything as is; fix smudges and continue lines and screentone naturally. No text.",
+    "quant": "GGUF Q4_K_M"
+   },
+   "files": [
+    {
+     "name": "qwen-image-2.1-turbo-Q4_K_M.gguf",
+     "role": "diffusion",
+     "url": "https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF/resolve/main/qwen-image-2.1-turbo-Q4_K_M.gguf",
+     "sha256": "8940e8b522af886e0c0f5afddf720e82dd223cb9a43580b5f61c4d740452ac20",
+     "size": 4199565120,
+     "only": ""
+    },
+    {
+     "name": "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf",
+     "role": "llm",
+     "url": "https://huggingface.co/unsloth/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf",
+     "sha256": "e3d1a6e87c5cb31e054f2c3bc0dd82ffde052f613de5eef3665b7bd33c9b703e",
+     "size": 5148699488,
+     "only": ""
+    },
+    {
+     "name": "Qwen3-VL-8B-Instruct-mmproj-F16.gguf",
+     "role": "llm_vision",
+     "url": "https://huggingface.co/unsloth/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-F16.gguf",
+     "sha256": "d406d03ebabefdef86a2c86bf0c1b65f9e046f7a81c218f25de4931b46a07fc4",
+     "size": 1159030336,
+     "only": ""
+    },
+    {
+     "name": "qwen_image_2.1_vae_bf16.safetensors",
+     "role": "vae",
+     "url": "https://huggingface.co/unsloth/Qwen-Image-2.1-FP8/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors",
+     "sha256": "71879ffd5321e6d10c3c87513e2b474b1252efa7f3dec2969214a9bf06a6dd5c",
+     "size": 675508656,
+     "only": ""
+    }
+   ]
+  },
+  {
+   "id": "sdnq-qwen-image-2-1-turbo",
+   "name": "Qwen-Image 2.1 Turbo (NVIDIA)",
+   "backend": "sdnq",
+   "kind": "redraw",
+   "mode": "edit",
+   "description": "Aynı model, NVIDIA kartlar için 4-bit SDNQ sürümü; daha az VRAM kullanır.",
+   "license": "Qwen Research (ticari olmayan)",
+   "license_url": "https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
+   "min_vram_gb": 10,
+   "min_ram_gb": 24,
+   "hf_repo": "SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256",
+   "notes": "Qwen3-VL-8B metin kodlayıcı dahil; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~70 sn, en çok ~10,5 GB VRAM.",
+   "params": {
+    "pipeline": "QwenImage21Pipeline",
+    "steps": 8,
+    "multiple": 32,
+    "quant": "4-bit dinamik · Hadamard",
+    "max_width": 2048,
+    "input_mode": "green",
+    "prompt": "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.",
+    "prompt_green": "Remove the green areas and restore the artwork underneath, matching the surrounding lines and screentone. Do not add any text.",
+    "prompt_lama_prefill": "Clean manga artwork. Keep everything as is; fix smudges and continue lines and screentone naturally. No text."
+   },
+   "files": [
+    {
+     "name": "processor/chat_template.jinja",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/processor/chat_template.jinja",
+     "sha256": null,
+     "size": 5292,
+     "only": ""
+    },
+    {
+     "name": "processor/processor_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/processor/processor_config.json",
+     "sha256": null,
+     "size": 1325,
+     "only": ""
+    },
+    {
+     "name": "processor/tokenizer.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/processor/tokenizer.json",
+     "sha256": "be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506",
+     "size": 11422650,
+     "only": ""
+    },
+    {
+     "name": "processor/tokenizer_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/processor/tokenizer_config.json",
+     "sha256": null,
+     "size": 734,
+     "only": ""
+    },
+    {
+     "name": "scheduler/scheduler_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/scheduler/scheduler_config.json",
+     "sha256": null,
+     "size": 486,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/text_encoder/config.json",
+     "sha256": null,
+     "size": 37698,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/generation_config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/text_encoder/generation_config.json",
+     "sha256": null,
+     "size": 142,
+     "only": ""
+    },
+    {
+     "name": "text_encoder/model.safetensors",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/text_encoder/model.safetensors",
+     "sha256": "bf2abb5562f5af573a8420b09450bbe734ef8f1bb5f5dcadf73520c707da42eb",
+     "size": 6737716656,
+     "only": ""
+    },
+    {
+     "name": "transformer/config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/transformer/config.json",
+     "sha256": null,
+     "size": 16939,
+     "only": ""
+    },
+    {
+     "name": "transformer/diffusion_pytorch_model.safetensors",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/transformer/diffusion_pytorch_model.safetensors",
+     "sha256": "04e797f2c818f7a8b38e47a7dbc5d505deb109806be4d29757f33e1bf52834af",
+     "size": 4101092720,
+     "only": ""
+    },
+    {
+     "name": "vae/config.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/vae/config.json",
+     "sha256": null,
+     "size": 2079,
+     "only": ""
+    },
+    {
+     "name": "vae/diffusion_pytorch_model.safetensors",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/vae/diffusion_pytorch_model.safetensors",
+     "sha256": "a5866159392ea07ae6eaf88bfa8bce4e91ecaefe2a2896ba6d4ce81a0ea4eda7",
+     "size": 675508656,
+     "only": ""
+    },
+    {
+     "name": "model_index.json",
+     "role": "snapshot",
+     "url": "https://huggingface.co/SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256/resolve/main/model_index.json",
+     "sha256": null,
+     "size": 626,
      "only": ""
     }
    ]

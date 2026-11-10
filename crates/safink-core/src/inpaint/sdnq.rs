@@ -60,7 +60,7 @@ impl Inpainter for SdnqInpainter {
         let inp = self.w.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.w.workdir.join(format!("out_{}.png", self.counter));
         let prepared = self.prep.prepare(img, mask, ctx)?;
-        let padded = super::pad16(&prepared);
+        let padded = super::pad_for(&prepared, &self.spec.params);
         let pd = padded.dimensions();
         padded.save(&inp)?;
         let r = self.w.call(&serde_json::json!({
