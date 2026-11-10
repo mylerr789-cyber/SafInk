@@ -102,7 +102,11 @@ impl Engine {
 
     pub fn set_settings(&self, s: Settings) -> Result<()> {
         s.save(&self.paths)?;
+        let model_changed = self.settings.read().model_id != s.model_id;
         *self.settings.write() = s;
+        if model_changed {
+            inpaint::sdserver::shutdown(); // başka model seçildi: sd.cpp sunucusu belleği bıraksın
+        }
         Ok(())
     }
 
@@ -447,9 +451,17 @@ impl Engine {
                         pid,
                         &mut inp,
                         &mut || {
-                            *msg2.lock() = "model yükleniyor…".into();
+                            *msg2.lock() = crate::loc::pick("model yükleniyor…", "loading model…");
                             mk2("running");
-                            match inpaint::create(&me.paths, &ms, &settings) {
+                            let (mm, mk3) = (msg2.clone(), mk2.clone());
+                            let last = std::cell::Cell::new(std::time::Instant::now());
+                            match inpaint::create_with(&me.paths, &ms, &settings, &ctl2.cancel, &|m: String| {
+                                *mm.lock() = m;
+                                if last.get().elapsed().as_secs() >= 2 {
+                                    last.set(std::time::Instant::now());
+                                    mk3("running");
+                                }
+                            }) {
                                 Ok(i) => {
                                     *msg2.lock() = i.label();
                                     Ok(i)

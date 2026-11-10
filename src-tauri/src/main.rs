@@ -186,7 +186,12 @@ fn main() {
             rename_chapter, list_pages, get_page, reorder_pages, set_locale, delete_page, import_folder, add_to_chapter, quick_new, start_job, cancel_job, pause_job,
             job_running, export_pages, reveal_path, save_edit, reset_edits, list_models, hardware, install_model, cancel_install, remove_model
         ])
-        .run(tauri::generate_context!())
-        .expect("SafInk failed to start");
+        .build(tauri::generate_context!())
+        .expect("SafInk failed to start")
+        .run(|_app, ev| {
+            if matches!(ev, tauri::RunEvent::Exit) {
+                safink_core::inpaint::sdserver::shutdown(); // sd.cpp sunucusu yetim kalmasın
+            }
+        });
 }
 

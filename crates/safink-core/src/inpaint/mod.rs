@@ -2,6 +2,7 @@
 pub mod ort_lama;
 pub mod pyworker;
 pub mod sdcpp;
+pub mod sdserver;
 pub mod sdnq;
 pub mod torch_lama;
 
@@ -33,13 +34,18 @@ pub trait Inpainter: Send {
 }
 
 pub fn create(paths: &AppPaths, spec: &ModelSpec, settings: &Settings) -> Result<Box<dyn Inpainter>> {
+    create_with(paths, spec, settings, &AtomicBool::new(false), &|_| {})
+}
+
+/// `create` + yükleme ilerlemesi/iptali (sd.cpp sunucusu modeli burada yükler; diğer arka uçlar yok sayar).
+pub fn create_with(paths: &AppPaths, spec: &ModelSpec, settings: &Settings, cancel: &AtomicBool, progress: &dyn Fn(String)) -> Result<Box<dyn Inpainter>> {
     if !spec.is_installed(paths) {
         bail!(crate::t!("model kurulu değil: {} (Modeller bölümünden indirin)", "model not installed: {} (download it in Models)", spec.name));
     }
     match spec.backend.as_str() {
         "lama" if crate::catalog::hardware().nvidia() => Ok(Box::new(torch_lama::TorchLama::new(paths, spec)?)),
         "lama" => Ok(Box::new(ort_lama::OrtInpainter::new(paths, spec)?)),
-        "sdcpp" => Ok(Box::new(sdcpp::SdCppInpainter::new(paths, spec, settings)?)),
+        "sdcpp" => Ok(Box::new(sdcpp::SdCppInpainter::new_with(paths, spec, settings, cancel, progress)?)),
         "sdnq" => Ok(Box::new(sdnq::SdnqInpainter::new(paths, spec, settings)?)),
         b => bail!("bilinmeyen arka uç: {b}"),
     }
