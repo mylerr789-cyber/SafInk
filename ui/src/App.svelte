@@ -11,16 +11,19 @@
   import Preferences from './views/Preferences.svelte';
   import Confirm from './ui/Confirm.svelte';
   import Help from './ui/Help.svelte';
+  import Update from './ui/Update.svelte';
+  import { updater } from './lib/updater.svelte';
 
   onMount(() => {
     app.init();
+    const ut = setTimeout(() => updater.check(true), 6000);
     let un: (() => void) | undefined;
     onDragDrop((p) => {
       if (p.type === 'enter' || p.type === 'over') app.dragging = true;
       else if (p.type === 'leave') app.dragging = false;
       else if (p.type === 'drop') { app.dragging = false; app.quick(p.paths); }
     }).then((f) => (un = f));
-    return () => un?.();
+    return () => { un?.(); clearTimeout(ut); };
   });
   $effect(() => { app.pagesOpen; app.inspectorOpen; app.savePanels(); });
   // kaldığın yerden devam: açık bölüm/sayfa değiştikçe kaydet
@@ -88,6 +91,7 @@
 {#if app.dialog === 'prefs'}<Preferences />{/if}
 {#if app.help}<Help />{/if}
 <Confirm />
+<Update />
 
 {#if app.dragging}
   <div class="fixed inset-0 z-[200] pointer-events-none p-4 bg-paper/70 fade-in">

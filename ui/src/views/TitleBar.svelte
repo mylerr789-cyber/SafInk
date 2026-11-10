@@ -4,6 +4,7 @@
   import { api } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
   import { importChapterFolder, importPages, resetPageEdits } from '../lib/actions';
+  import { updater } from '../lib/updater.svelte';
   import Logo from '../ui/Logo.svelte';
 
   interface Item { label?: string; kbd?: string; run?: () => void; sep?: boolean; disabled?: boolean }
@@ -52,6 +53,7 @@
     ] },
     { id: 'help', name: t('menu.help'), items: [
       { label: t('help.shortcuts'), kbd: '?', run: () => (app.help = true) },
+      { label: t('update.check'), run: () => updater.check(false) },
       { label: t('common.models_dots'), run: () => { app.prefsTab = 'models'; app.dialog = 'prefs'; } },
     ] },
   ]);

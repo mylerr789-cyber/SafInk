@@ -166,6 +166,8 @@ fn main() {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into())).init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .register_asynchronous_uri_scheme_protocol("safink", |ctx, request, responder| {
             let eng = ctx.app_handle().state::<Arc<Engine>>().inner().clone();
             let path = request.uri().path().to_string();

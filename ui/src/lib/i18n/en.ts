@@ -56,6 +56,14 @@ export const en: Record<Key, string> & Record<`${string}.one`, string> = {
   'run.retry_errors': 'Retry failed pages',
   'run.stop': 'Stop job',
   'help.shortcuts': 'Shortcuts',
+  'update.check': 'Check for updates',
+  'update.title': 'Update',
+  'update.available': 'New version: v{v}',
+  'update.install': 'Update',
+  'update.later': 'Later',
+  'update.installing': 'Downloading, then restarting',
+  'update.latest': 'SafInk is up to date',
+  'update.failed': 'Update failed: {err}',
 
   // title bar
   'bar.library': 'Library',

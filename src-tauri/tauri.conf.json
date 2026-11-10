@@ -21,11 +21,31 @@
         "backgroundColor": "#1b1b1d"
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"]
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENGMDE2REFCMTM1OUVEODkKUldTSjdWa1RxMjBCengvazQ1S01HcWZlc3NJWExocDlQM2U0QVdWaExKbklRYlphWE5NN1lHMCsK",
+      "endpoints": [
+        "https://github.com/mylerr789-cyber/SafInk/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

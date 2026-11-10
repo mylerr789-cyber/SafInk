@@ -55,6 +55,14 @@ export const tr = {
   'run.retry_errors': 'Hatalı sayfaları yeniden dene',
   'run.stop': 'İşi durdur',
   'help.shortcuts': 'Kısayollar',
+  'update.check': 'Güncellemeleri denetle',
+  'update.title': 'Güncelleme',
+  'update.available': 'Yeni sürüm: v{v}',
+  'update.install': 'Güncelle',
+  'update.later': 'Sonra',
+  'update.installing': 'İndiriliyor, ardından yeniden başlayacak',
+  'update.latest': 'SafInk güncel',
+  'update.failed': 'Güncelleme başarısız: {err}',
 
   // başlık çubuğu
   'bar.library': 'Kütüphane',
