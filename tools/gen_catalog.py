@@ -43,8 +43,8 @@ def add(**k):
 EDIT_PROMPT = ("Erase only the Japanese lettering and sound effect characters. "
                "Do not remove or alter any other lines or marks in the artwork.")
 
-# Redraw girdi kipi (inpaint/mod.rs InputPrep): varsayılan green; tam sayfa, ölçeksiz (max_width).
-PAGE = {"max_width": 2048, "input_mode": "green", "prompt": EDIT_PROMPT,
+# Redraw girdi kipi (inpaint/mod.rs InputPrep): varsayılan green; karo karo (çekirdek <= 512 + 128 bağlam), ölçeksiz.
+PAGE = {"input_mode": "green", "prompt": EDIT_PROMPT,
         "prompt_green": "Remove the green areas and restore the artwork underneath, matching the surrounding lines and screentone. Do not add any text.",
         "prompt_lama_prefill": "Clean manga artwork. Keep everything as is; fix smudges and continue lines and screentone naturally. No text."}
 

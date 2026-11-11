@@ -3,7 +3,7 @@
 //! Yaklaşım MangaTranslator ile aynı: kırpıntı referans görüntü + sabit metin; maske yalnızca geri yazmada kullanılır.
 //! Gerçek model çalıştırma TEST EDİLMEDİ (multi-GB indirme yapılmadı).
 use super::pyworker::PyWorker;
-use super::{Ctx, Inpainter, WindowPolicy};
+use super::{Ctx, Inpainter, TileSpec};
 use crate::catalog::ModelSpec;
 use crate::paths::AppPaths;
 use crate::settings::Settings;
@@ -50,7 +50,7 @@ impl SdnqInpainter {
 
 impl Inpainter for SdnqInpainter {
     fn label(&self) -> String { format!("SDNQ · {}", self.spec.name) }
-    fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
+    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, ..TileSpec::DEFAULT } }
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
             bail!(crate::loc::pick("iptal edildi", "cancelled"));

@@ -515,7 +515,7 @@ impl Engine {
                         &params2,
                         &ctl2.cancel,
                         &|d, t| {
-                            *msg2.lock() = crate::t!("pencere {d}/{t}", "window {d}/{t}");
+                            *msg2.lock() = crate::t!("parça {d}/{t}", "tile {d}/{t}");
                             mk2("running");
                         },
                     );

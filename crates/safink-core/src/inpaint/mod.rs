@@ -13,13 +13,18 @@ use anyhow::{bail, Result};
 use image::{GrayImage, RgbImage};
 use std::sync::atomic::AtomicBool;
 
-#[derive(Clone, Copy, Debug)]
-pub enum WindowPolicy {
-    /// Sabit kare pencere (ONNX, 512).
-    Fixed(u32),
-    /// Tam sayfa (redraw): sayfa bütün gider; yüksekliği `seg_h`'yi aşan şeritler `overlap` px örtüşen dilimlere bölünür.
-    /// Genişlik `max_w`, alan `max_px` aşılırsa hata (küçültme yok).
-    Page { seg_h: u32, overlap: u32, max_w: u32, max_px: u64 },
+/// Koharu gibi karo planı: maske bileşenleri çekirdekleri `core` px'i aşmayan karolara gruplanır, her karo çekirdek + `context` px
+/// bağlamla yerel çözünürlükte (ölçekleme yok) modele gider. `postprocess`: difüzyon çıktısına MangaTranslator son işlemi
+/// (ışıklılık eşleme + glif kompoziti + ton eşleme) uygulanır; LaMa çıktısı sert yapıştırılır.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TileSpec {
+    pub core: u32,
+    pub context: u32,
+    pub postprocess: bool,
+}
+
+impl TileSpec {
+    pub const DEFAULT: TileSpec = TileSpec { core: 512, context: 128, postprocess: false };
 }
 
 pub struct Ctx<'a> {
@@ -28,8 +33,9 @@ pub struct Ctx<'a> {
 
 pub trait Inpainter: Send {
     fn label(&self) -> String;
-    fn policy(&self) -> WindowPolicy;
-    /// `mask`: 255 = silinecek/yeniden çizilecek. Çıktı `img` ile aynı boyutta olmalı.
+    fn tile_spec(&self) -> TileSpec;
+    /// `img`: yerel çözünürlükte kırpıntı (en çok core + 2*context). `mask`: 255 = silinecek/yeniden çizilecek.
+    /// Çıktı `img` ile aynı boyutta olmalı; model boyut katına dolgu/kırpmayı kendisi yapar.
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage>;
 }
 
@@ -82,11 +88,6 @@ pub fn crop_to(out: RgbImage, w: u32, h: u32, padded: (u32, u32)) -> Result<RgbI
     }
     Ok(image::imageops::crop_imm(&out, 0, 0, w, h).to_image())
 }
-/// Redraw modelleri için tam sayfa politikası (katalog `params`: seg_h, overlap, max_width, max_pixels).
-pub fn page_policy(params: &serde_json::Value) -> WindowPolicy {
-    let u = |k: &str, d: u64| params.get(k).and_then(|v| v.as_u64()).unwrap_or(d);
-    WindowPolicy::Page { seg_h: u("seg_h", 2000) as u32, overlap: u("overlap", 200) as u32, max_w: u("max_width", 2048) as u32, max_px: u("max_pixels", 6_300_000) }
-}
 pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
     let mut out = GrayImage::new(w, h);
     for y in 0..img.height().min(h) {
@@ -100,8 +101,8 @@ pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
 /// Redraw modellerinin girdi hazırlığı (katalog `params.input_mode`):
 /// - `original`: sayfa olduğu gibi gider (maske modele verilmez),
 /// - `green`: maskeli (genişletilmiş) pikseller saf #00FF00 boyanır, komut "yeşil alanları kaldır" der,
-/// - `lama_prefill`: maske önce LaMa ile doldurulur (tam parça, 512 pencereli), Flux yalnızca düzeltir.
-/// Redraw modellerinde geri yazım yoktur: model çıktısı sayfanın kendisidir. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
+/// - `lama_prefill`: maske önce LaMa ile doldurulur (karo karo), Flux yalnızca düzeltir.
+/// Karo çıktıları yalnızca maskeli piksellerde sayfaya yazılır. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
 /// ortam değişkenleri katalog değerinin üstüne yazar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
@@ -142,7 +143,7 @@ impl InputPrep {
         Ok(Self { mode, prompt, lama })
     }
 
-    /// Modele gidecek görüntü (özgün boyutta; dolgu çağıranda yapılır).
+    /// Modele gidecek görüntü (kırpıntı boyutunda; dolgu çağıranda yapılır).
     pub fn prepare(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         match self.mode {
             InputMode::Original => Ok(img.clone()),

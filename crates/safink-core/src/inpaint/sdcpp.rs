@@ -1,6 +1,6 @@
 //! stable-diffusion.cpp arka ucu. Varsayılan: model bir kez yüklenen `sd-server` (bkz. `sdserver.rs`);
-//! sunucu başlamazsa / kapalıysa her pencere için `sd-cli.exe` süreci (eski yol, aynı bayraklar, aynı tohum).
-use super::{Ctx, Inpainter, WindowPolicy};
+//! sunucu başlamazsa / kapalıysa her karo için `sd-cli.exe` süreci (eski yol, aynı bayraklar, aynı tohum).
+use super::{Ctx, Inpainter, TileSpec};
 use crate::catalog::ModelSpec;
 use crate::paths::AppPaths;
 use crate::settings::Settings;
@@ -182,7 +182,7 @@ impl SdCppInpainter {
 
 impl Inpainter for SdCppInpainter {
     fn label(&self) -> String { format!("sd.cpp · {}", self.spec.name) }
-    fn policy(&self) -> WindowPolicy { super::page_policy(&self.spec.params) }
+    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, ..TileSpec::DEFAULT } }
 
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         self.counter += 1;
@@ -192,10 +192,6 @@ impl Inpainter for SdCppInpainter {
         let (w, h) = padded.dimensions();
         let inp = self.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.workdir.join(format!("out_{}.png", self.counter));
-        if let Some(out) = self.try_server(&padded, ctx)? {
-            return super::crop_to(out, w0, h0, (w, h));
-        }
-        padded.save(&inp)?;
         if let Some(out) = self.try_server(&padded, ctx)? {
             return super::crop_to(out, w0, h0, (w, h));
         }

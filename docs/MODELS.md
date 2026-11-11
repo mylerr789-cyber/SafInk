@@ -17,6 +17,8 @@ Whatever model you pick, plain balloons (white, black, grey) never go to the mod
 
 \* Measured on an RTX 4060 Ti 16 GB. Times only apply to pages that go to the model; pages with plain balloons finish instantly because they skip the model.
 
+**The model processes only the text areas, not the whole page.** Remaining text is clustered; each cluster goes to the model with its surroundings (128 px of context) at native resolution, never downscaled, and the result is written back only onto the text pixels. Nothing outside the mask changes; tall webtoon strips use the same path. Measured (1115×1600 page, RTX 4060 Ti 16 GB): Qwen ~49 s → ~28 s, Klein ~17 s → ~14 s, LaMa ~1 s (unchanged).
+
 ## Recommendation by graphics card
 
 - **NVIDIA, 12 GB or more:** LaMa Manga first; Qwen for text over artwork.

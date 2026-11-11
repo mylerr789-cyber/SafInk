@@ -1,7 +1,9 @@
-//! Sayfa temizleme hattı: genişlet -> (düz doldur) -> LaMa: pencerele/inpaint/maskeli pikselleri tüyle geri yaz; redraw: tam sayfa model çıktısı (geri yazım yok).
+//! Sayfa temizleme hattı (Koharu gibi): genişlet -> (balon içi düz doldur) -> kalan maske bileşenleri karolara bölünür; her karo yerel
+//! çözünürlükte (çekirdek <= 512, + 128 px bağlam) modele gider ve yalnızca maskeli pikseller sayfaya yazılır (LaMa, Flux, Qwen aynı yol).
 use crate::bubbles::Bubble;
-use crate::inpaint::{pad_gray, pad_rgb, Ctx, Inpainter, WindowPolicy};
-use crate::maskops::{self, Rect};
+use crate::inpaint::{Ctx, Inpainter, TileSpec};
+use crate::maskops;
+use crate::postproc;
 use anyhow::{bail, Result};
 use image::{GrayImage, RgbImage};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -367,85 +369,6 @@ pub fn flat_pass(img: &RgbImage, m: &GrayImage, feather: u32, bubbles: Option<&[
     }
 }
 
-struct Win {
-    /// Görüntü koordinatlarında kırpma bölgesi (görüntü içinde).
-    rect: Rect,
-    /// Bu pencerenin "sahip olduğu" maske bölgesi.
-    core: Rect,
-}
-
-fn clamp_rect_to(r: Rect, w: i32, h: i32) -> Rect {
-    Rect { x0: r.x0.max(0), y0: r.y0.max(0), x1: r.x1.min(w), y1: r.y1.min(h) }
-}
-
-/// `core`'u içeren, hedef boyutlu (ya da görüntüden küçükse görüntü boyutlu) pencere.
-fn make_window(core: Rect, tw: i32, th: i32, iw: i32, ih: i32) -> Rect {
-    let (ww, wh) = (tw.min(iw), th.min(ih));
-    let cx = (core.x0 + core.x1) / 2;
-    let cy = (core.y0 + core.y1) / 2;
-    let x0 = (cx - ww / 2).clamp(0, iw - ww);
-    let y0 = (cy - wh / 2).clamp(0, ih - wh);
-    Rect { x0, y0, x1: x0 + ww, y1: y0 + wh }
-}
-
-/// Sınırlı birleştirme: birleşim `max_w` x `max_h`'ı aşmıyorsa ve kutular `gap` içindeyse birleştir.
-fn merge_bounded(mut boxes: Vec<Rect>, gap: i32, max_w: i32, max_h: i32) -> Vec<Rect> {
-    boxes.sort_by_key(|b| (b.y0, b.x0));
-    loop {
-        let mut merged = false;
-        let mut i = 0;
-        while i < boxes.len() {
-            let mut j = i + 1;
-            while j < boxes.len() {
-                if boxes[j].y0 > boxes[i].y1 + gap + max_h {
-                    // sıralı değil ama büyük farklarda erken çıkış güvenli değil; sadece devam
-                }
-                let u = boxes[i].union(&boxes[j]);
-                if u.w() <= max_w && u.h() <= max_h && boxes[i].grow(gap / 2).intersects(&boxes[j].grow(gap / 2)) {
-                    boxes[i] = u;
-                    boxes.swap_remove(j);
-                    merged = true;
-                } else {
-                    j += 1;
-                }
-            }
-            i += 1;
-        }
-        if !merged {
-            break;
-        }
-    }
-    boxes.sort_by_key(|b| (b.y0, b.x0));
-    boxes
-}
-
-fn plan(mask: &GrayImage, policy: WindowPolicy) -> Vec<Win> {
-    let (iw, ih) = (mask.width() as i32, mask.height() as i32);
-    let comps: Vec<Rect> = maskops::component_boxes(mask, 4).into_iter().map(|(r, _)| r).collect();
-    let (target, core_max) = match policy {
-        WindowPolicy::Fixed(s) => (s as i32, s as i32 - 96),
-        WindowPolicy::Page { .. } => unreachable!("tam sayfa politikası plan() kullanmaz"),
-    };
-    let groups = merge_bounded(comps, 48, core_max, core_max);
-    let mut wins = Vec::new();
-    for g in groups {
-        // çok büyük tek bileşenleri çekirdek karolara böl
-        let nx = ((g.w() + core_max - 1) / core_max).max(1);
-        let ny = ((g.h() + core_max - 1) / core_max).max(1);
-        for ty in 0..ny {
-            for tx in 0..nx {
-                let core = clamp_rect_to(
-                    Rect { x0: g.x0 + tx * core_max, y0: g.y0 + ty * core_max, x1: (g.x0 + (tx + 1) * core_max).min(g.x1), y1: (g.y0 + (ty + 1) * core_max).min(g.y1) },
-                    iw,
-                    ih,
-                );
-                wins.push(Win { rect: make_window(core, target, target, iw, ih), core });
-            }
-        }
-    }
-    wins
-}
-
 /// Tüm sayfayı temizler. `mask`: son (dilate edilmemiş) maske, 0/255.
 pub fn clean_image(
     img: &RgbImage,
@@ -471,72 +394,167 @@ pub fn clean_image(
     clean_dilated(img, m, p, inp, cancel, progress)
 }
 
-/// Genişletilmiş maskeyi (`m`) seçilen modelle temizler.
+/// Koharu karo planı (koharu-pipeline stages/inpainting.rs `inpaint_tiles`): bir karo = bir ya da daha çok maske bileşeni.
+/// `core`: karonun sahip olduğu bölge `[x0, y0, x1, y1)`; `crop`: çekirdek + bağlam (sayfaya sıkıştırılmış), modele giden kırpıntı.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tile {
+    pub components: Vec<u32>,
+    pub core: [u32; 4],
+    pub crop: [u32; 4],
+}
+
+fn union_bounds(a: [u32; 4], b: [u32; 4]) -> [u32; 4] {
+    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+}
+fn bounds_area(b: [u32; 4]) -> u64 { (b[2] - b[0]) as u64 * (b[3] - b[1]) as u64 }
+fn expand_bounds(b: [u32; 4], ctx: u32, w: u32, h: u32) -> [u32; 4] {
+    [b[0].saturating_sub(ctx), b[1].saturating_sub(ctx), b[2].saturating_add(ctx).min(w), b[3].saturating_add(ctx).min(h)]
+}
+
+/// Maskeyi (≥128) 8-bağlantılı bileşenlere ayırır ve Koharu gibi karolara böler: çekirdeği ≤ `spec.core`×`spec.core` olan bileşenler,
+/// birleşim sınır kutusu bu sınırı aşmıyorsa en az büyüyen karoya gruplanır; daha büyük bileşenler `core`'luk çekirdeklere bölünür.
+/// Her karonun kırpıntısı çekirdek + `spec.context` px (sayfaya sıkıştırılmış). Döner: piksel başına bileşen etiketi (0 = yok) ve karolar.
+pub fn plan_tiles(mask: &GrayImage, spec: &TileSpec) -> (Vec<u32>, Vec<Tile>) {
+    let (w, h) = mask.dimensions();
+    let (labels, spans) = label_components(mask);
+    let n = spans.len().saturating_sub(1);
+    let mut bb = vec![[u32::MAX, u32::MAX, 0u32, 0u32]; n + 1];
+    for y in 0..h {
+        for x in 0..w {
+            let l = labels[(y * w + x) as usize] as usize;
+            if l != 0 {
+                let b = &mut bb[l];
+                *b = [b[0].min(x), b[1].min(y), b[2].max(x + 1), b[3].max(y + 1)];
+            }
+        }
+    }
+    let (size, ctx) = (spec.core.max(1), spec.context);
+    let mut bounded: Vec<Tile> = Vec::new();
+    let mut split: Vec<Tile> = Vec::new();
+    for l in 1..=n {
+        let b = bb[l];
+        if b[2] - b[0] <= size && b[3] - b[1] <= size {
+            let best = bounded
+                .iter()
+                .enumerate()
+                .filter_map(|(i, t)| {
+                    let u = union_bounds(t.core, b);
+                    ((u[2] - u[0] <= size) && (u[3] - u[1] <= size)).then_some((bounds_area(u) - bounds_area(t.core), i, u))
+                })
+                .min_by_key(|&(g, i, _)| (g, i));
+            if let Some((_, i, u)) = best {
+                let t = &mut bounded[i];
+                t.components.push(l as u32);
+                t.core = u;
+                t.crop = expand_bounds(u, ctx, w, h);
+            } else {
+                bounded.push(Tile { components: vec![l as u32], core: b, crop: expand_bounds(b, ctx, w, h) });
+            }
+            continue;
+        }
+        let mut ct = b[1];
+        while ct < b[3] {
+            let cb = ct.saturating_add(size).min(b[3]);
+            let mut cl = b[0];
+            while cl < b[2] {
+                let cr = cl.saturating_add(size).min(b[2]);
+                let core = [cl, ct, cr, cb];
+                // çekirdeğin içinde bu bileşenin kapladığı kutu
+                let (mut x0, mut y0, mut x1, mut y1) = (cr, cb, 0u32, 0u32);
+                for y in ct..cb {
+                    for x in cl..cr {
+                        if labels[(y * w + x) as usize] == l as u32 {
+                            x0 = x0.min(x);
+                            y0 = y0.min(y);
+                            x1 = x1.max(x + 1);
+                            y1 = y1.max(y + 1);
+                        }
+                    }
+                }
+                if x1 > x0 && y1 > y0 {
+                    split.push(Tile { components: vec![l as u32], core, crop: expand_bounds([x0, y0, x1, y1], ctx, w, h) });
+                }
+                cl = cr;
+            }
+            ct = cb;
+        }
+    }
+    bounded.append(&mut split);
+    for t in bounded.iter_mut() {
+        t.components.sort_unstable();
+    }
+    bounded.sort_by_key(|t| (t.core[1], t.core[0], t.core[3], t.core[2]));
+    (labels, bounded)
+}
+
+/// Genişletilmiş maskeyi (`m`) seçilen modelle Koharu gibi karo karo temizler: her karo yerel çözünürlükte modele gider
+/// (yalnızca model boyut katına dolgu), çıktının yalnızca karonun maske bileşenlerinden çekirdek içine düşen pikselleri sayfaya
+/// yazılır; maske dışı hiçbir piksel değişmez. Difüzyon karolarında MangaTranslator son işlemi uygulanır (bkz. `postproc`).
+/// Not: Koharu'nun kendisi ton eşleme/tüy yapmaz, sert yapıştırır; LaMa karoları öyle yapıştırılır. `_p.feather` yalnızca düz doldurmada kullanılır.
 pub fn clean_dilated(
     img: &RgbImage,
     m: GrayImage,
-    p: &CleanParams,
+    _p: &CleanParams,
     inp: &mut dyn Inpainter,
     cancel: &AtomicBool,
     progress: &dyn Fn(usize, usize),
 ) -> Result<RgbImage> {
-    if let WindowPolicy::Page { seg_h, overlap, max_w, max_px } = inp.policy() {
-        return clean_paged(img, m, p, inp, cancel, progress, seg_h, overlap, max_w, max_px);
-    }
-    let wins = plan(&m, inp.policy());
-    let mut remaining = m;
+    let spec = inp.tile_spec();
+    let (iw, ih) = img.dimensions();
+    let (labels, tiles) = plan_tiles(&m, &spec);
+    let post = if spec.postprocess { postproc::Post::from_env() } else { postproc::Post::None };
+    let radius = postproc::glyph_radius(iw, ih);
     let mut work = img.clone();
-    let total = wins.len();
+    let mut pending = m;
+    let total = tiles.len();
     progress(0, total);
-    let fixed = match inp.policy() {
-        WindowPolicy::Fixed(s) => Some(s),
-        WindowPolicy::Page { .. } => None,
-    };
-    for (i, w) in wins.iter().enumerate() {
+    for (i, t) in tiles.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             bail!("iptal edildi");
         }
-        let (rw, rh) = (w.rect.w() as u32, w.rect.h() as u32);
-        let crop = image::imageops::crop_imm(&work, w.rect.x0 as u32, w.rect.y0 as u32, rw, rh).to_image();
-        // pencere içi maske: yalnızca çekirdeğin sahip olduğu kalan pikseller
-        let mut wm = GrayImage::new(rw, rh);
-        let mut any = false;
-        for y in w.core.y0.max(w.rect.y0)..w.core.y1.min(w.rect.y1) {
-            for x in w.core.x0.max(w.rect.x0)..w.core.x1.min(w.rect.x1) {
-                if remaining.get_pixel(x as u32, y as u32)[0] >= 128 {
-                    wm.put_pixel((x - w.rect.x0) as u32, (y - w.rect.y0) as u32, image::Luma([255]));
-                    any = true;
+        let [cx0, cy0, cx1, cy1] = t.crop;
+        let (cw, ch) = (cx1 - cx0, cy1 - cy0);
+        let crop = image::imageops::crop_imm(&work, cx0, cy0, cw, ch).to_image();
+        // kırpıntı maskesi: hâlâ bekleyen tüm maske (önceki karoların yazdığı pikseller artık temiz bağlamdır)
+        let mut cm = GrayImage::new(cw, ch);
+        for y in 0..ch {
+            for x in 0..cw {
+                if pending.get_pixel(cx0 + x, cy0 + y)[0] >= 128 {
+                    cm.put_pixel(x, y, image::Luma([255]));
                 }
             }
         }
-        if !any {
-            progress(i + 1, total);
-            continue;
+        let out = inp.inpaint(&crop, &cm, &Ctx { cancel })?;
+        if out.dimensions() != (cw, ch) {
+            bail!("model beklenmeyen boyut döndürdü: {:?} (beklenen {}x{})", out.dimensions(), cw, ch);
         }
-        let (crop_in, wm_in) = match fixed {
-            Some(s) => (pad_rgb(&crop, s, s), pad_gray(&wm, s, s)),
-            None => (crop.clone(), wm.clone()),
+        // karonun sahip olduğu pikseller: çekirdek içinde, karonun bileşenlerinden
+        let [kx0, ky0, kx1, ky1] = t.core;
+        let mut own = vec![false; (cw * ch) as usize];
+        let mut lab_crop = vec![0u32; (cw * ch) as usize];
+        for y in ky0..ky1 {
+            for x in kx0..kx1 {
+                let l = labels[(y * iw + x) as usize];
+                if l != 0 && t.components.binary_search(&l).is_ok() {
+                    let k = ((y - cy0) * cw + (x - cx0)) as usize;
+                    own[k] = true;
+                    lab_crop[k] = l;
+                }
+            }
+        }
+        let patch = match post {
+            postproc::Post::None => out,
+            postproc::Post::Lum => postproc::match_luminance(&crop, &out, &cm),
+            postproc::Post::Full => {
+                let lum = postproc::match_luminance(&crop, &out, &cm);
+                postproc::composite_glyphs(&crop, &lum, &cm, &own, &lab_crop, radius)
+            }
         };
-        let ctx = Ctx { cancel };
-        let out_full = inp.inpaint(&crop_in, &wm_in, &ctx)?;
-        let out = image::imageops::crop_imm(&out_full, 0, 0, rw, rh).to_image();
-        let alpha = maskops::feather_alpha(&wm, p.feather as f32);
-        for y in 0..rh {
-            for x in 0..rw {
-                let a = alpha[(y * rw + x) as usize];
-                if a <= 0.004 {
-                    continue;
-                }
-                let (gx, gy) = (w.rect.x0 as u32 + x, w.rect.y0 as u32 + y);
-                let o = *work.get_pixel(gx, gy);
-                let n = *out.get_pixel(x, y);
-                let mut px = o;
-                for c in 0..3 {
-                    px[c] = (o[c] as f32 * (1.0 - a) + n[c] as f32 * a).round().clamp(0.0, 255.0) as u8;
-                }
-                work.put_pixel(gx, gy, px);
-                if wm.get_pixel(x, y)[0] >= 128 {
-                    remaining.put_pixel(gx, gy, image::Luma([0]));
+        for y in 0..ch {
+            for x in 0..cw {
+                if own[(y * cw + x) as usize] {
+                    work.put_pixel(cx0 + x, cy0 + y, *patch.get_pixel(x, y));
+                    pending.put_pixel(cx0 + x, cy0 + y, image::Luma([0]));
                 }
             }
         }
@@ -579,148 +597,30 @@ fn label_components(mask: &GrayImage) -> (Vec<u32>, Vec<(i32, i32)>) {
     (lab, ys)
 }
 
-/// Tam sayfa politikası: sayfa (ya da uzun şeritte en çok `seg_h` yüksekliğinde dikey dilimler) modele bütün olarak gider.
-/// Dilimler `overlap` kadar örtüşür; çıktı satırları modelin çıktısıdır (geri yazım/tüy yok), dilimler örtüşmenin ortasından sert kesimle birleşir. Bir yazı bileşeni sınırı
-/// aşarsa tamamı en çok pikselini içeren dilime verilir ve o dilimin penceresi bileşeni tam kapsayacak şekilde genişler.
-/// Ölçekleme yok: boyut kısıtını (16'nın katı) modelin kendisi dolgu ile sağlar. Sığmayan sayfa hata verir.
-#[allow(clippy::too_many_arguments)]
-fn clean_paged(
-    img: &RgbImage,
-    m: GrayImage,
-    _p: &CleanParams,
-    inp: &mut dyn Inpainter,
-    cancel: &AtomicBool,
-    progress: &dyn Fn(usize, usize),
-    seg_h: u32,
-    overlap: u32,
-    max_w: u32,
-    max_px: u64,
-) -> Result<RgbImage> {
-    let (iw, ih) = img.dimensions();
-    if iw > max_w {
-        bail!("sayfa çok geniş ({iw} px); bu model en çok {max_w} px genişliği işler (küçültme yapılmaz)");
-    }
-    let strip = ih > seg_h && ih as u64 > 2 * iw as u64;
-    if !strip && iw as u64 * ih as u64 > max_px {
-        bail!("sayfa çok büyük ({iw}x{ih}); bu model en çok {:.1} megapiksel işler (küçültme yapılmaz)", max_px as f64 / 1e6);
-    }
-    let ov = overlap as i32;
-    let (iwi, ihi) = (iw as i32, ih as i32);
-    // dilim çekirdekleri (birbirini kesmeyen y aralıkları)
-    let cores: Vec<(i32, i32)> = if strip {
-        let core_h = (seg_h - overlap) as i32;
-        let n = (ihi + core_h - 1) / core_h;
-        let ch = (ihi + n - 1) / n;
-        (0..n).map(|k| (k * ch, ((k + 1) * ch).min(ihi))).collect()
-    } else {
-        vec![(0, ihi)]
-    };
-    let n = cores.len();
-    let (labels, spans) = if n > 1 { label_components(&m) } else { (Vec::new(), Vec::new()) };
-    // bileşen -> sahip dilim (en çok piksel)
-    let mut owner = vec![0usize; spans.len()];
-    if n > 1 {
-        let mut counts = vec![0u32; spans.len() * n];
-        for y in 0..ihi {
-            let s = cores.iter().position(|c| y >= c.0 && y < c.1).unwrap_or(n - 1);
-            for &l in &labels[(y * iwi) as usize..((y + 1) * iwi) as usize] {
-                if l != 0 {
-                    counts[l as usize * n + s] += 1;
-                }
-            }
-        }
-        for l in 1..spans.len() {
-            owner[l] = (0..n).max_by_key(|&s| (counts[l * n + s], std::cmp::Reverse(s))).unwrap_or(0);
-        }
-    }
-    // pencere = çekirdek +- overlap/2, sahip olunan bileşenleri (64 px bağlamla) tam kapsayacak kadar genişletilir
-    let mut wins: Vec<(i32, i32)> = cores.iter().map(|&(a, b)| ((a - ov / 2).max(0), (b + ov / 2).min(ihi))).collect();
-    for l in 1..spans.len() {
-        let s = owner[l];
-        wins[s].0 = wins[s].0.min((spans[l].0 - 64).max(0));
-        wins[s].1 = wins[s].1.max((spans[l].1 + 64).min(ihi));
-    }
-    // dilim kesim satırları: varsayılan çekirdek sınırı (= örtüşmenin ortası); genişlemiş pencereler bileşeni tam kapsasın diye kayar
-    let mut cuts: Vec<i32> = vec![0; n + 1];
-    cuts[n] = ihi;
-    for k in 1..n {
-        let b = cores[k].0;
-        let mut cut = b;
-        // sınırı aşan bileşenin satırları sahibi olan dilimden gelsin (öbür dilim onu maskelemedi)
-        for l in 1..spans.len() {
-            if owner[l] == k && spans[l].0 < cut && spans[l].1 > b {
-                cut = cut.min(spans[l].0);
-            }
-        }
-        for l in 1..spans.len() {
-            if owner[l] == k - 1 && spans[l].1 > cut && spans[l].0 < b {
-                cut = cut.max(spans[l].1);
-            }
-        }
-        cuts[k] = cut.clamp(wins[k].0, wins[k - 1].1).max(cuts[k - 1]);
-    }
-    // Yeniden çizim modellerinde model çıktısı sayfanın kendisidir: geri yazım/tüy/karışım yok; şeritte dilimler sert kesimle birleşir.
-    let mut work = img.clone();
-    progress(0, n);
-    for s in 0..n {
-        if cancel.load(Ordering::Relaxed) {
-            bail!("iptal edildi");
-        }
-        let (wy0, wy1) = wins[s];
-        let rh = (wy1 - wy0) as u32;
-        let mut wm = GrayImage::new(iw, rh);
-        let mut any = false;
-        for y in wy0..wy1 {
-            for x in 0..iwi {
-                let i = (y * iwi + x) as usize;
-                let on = if n > 1 { labels[i] != 0 && owner[labels[i] as usize] == s } else { m.as_raw()[i] >= 128 };
-                if on {
-                    wm.put_pixel(x as u32, (y - wy0) as u32, image::Luma([255]));
-                    any = true;
-                }
-            }
-        }
-        // maskesiz dilim de modelden geçer (şeritte tüm çıktı modelin çıktısı olsun; yoksa özgün/model sınırında görünür kesim olur)
-        if !any && n == 1 {
-            progress(s + 1, n);
-            continue;
-        }
-        let crop = image::imageops::crop_imm(img, 0, wy0 as u32, iw, rh).to_image();
-        let out = inp.inpaint(&crop, &wm, &Ctx { cancel })?;
-        if out.dimensions() != (iw, rh) {
-            bail!("model beklenmeyen boyut döndürdü: {:?} (beklenen {}x{})", out.dimensions(), iw, rh);
-        }
-        let (c0, c1) = (cuts[s].max(wy0), cuts[s + 1].min(wy1));
-        for gy in c0..c1 {
-            for x in 0..iw {
-                work.put_pixel(x, gy as u32, *out.get_pixel(x, (gy - wy0) as u32));
-            }
-        }
-        progress(s + 1, n);
-    }
-    Ok(work)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inpaint::{Ctx, Inpainter, WindowPolicy};
+    use crate::inpaint::{Ctx, Inpainter, TileSpec};
     use image::Rgb;
 
-    /// Maskeli pikselleri macenta yapan sahte model; pencere boyutlarını kaydeder.
+    /// Maskeli pikselleri macenta yapan sahte model; kırpıntı boyutlarını kaydeder. Çıktının maske dışı pikselleri bilerek bozulur
+    /// (+1): sayfaya yalnızca maskeli piksellerin geçtiği doğrulanır.
     struct Mock {
         calls: Vec<(u32, u32)>,
+        spec: TileSpec,
+    }
+    impl Mock {
+        fn new() -> Self { Mock { calls: vec![], spec: TileSpec::DEFAULT } }
     }
     impl Inpainter for Mock {
         fn label(&self) -> String { "mock".into() }
-        fn policy(&self) -> WindowPolicy { WindowPolicy::Page { seg_h: 2000, overlap: 200, max_w: 2048, max_px: 6_300_000 } }
+        fn tile_spec(&self) -> TileSpec { self.spec }
         fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
             self.calls.push(img.dimensions());
             let mut o = img.clone();
             for (x, y, m) in mask.enumerate_pixels() {
-                if m[0] >= 128 {
-                    o.put_pixel(x, y, Rgb([255, 0, 255]));
-                }
+                let p = o.get_pixel_mut(x, y);
+                *p = if m[0] >= 128 { Rgb([255, 0, 255]) } else { Rgb([p[0].saturating_add(1), p[1], p[2]]) };
             }
             Ok(o)
         }
@@ -734,22 +634,57 @@ mod tests {
         }
     }
 
+    fn params(dilation: u32) -> CleanParams { CleanParams { dilation, feather: 2, flat_fill: false } }
+
     #[test]
-    fn strip_segments_stitch_with_hard_cut() {
-        let (w, h) = (600u32, 5120u32);
-        let img = RgbImage::from_fn(w, h, |x, y| Rgb([(x % 251) as u8, (y % 241) as u8, 7]));
+    fn tiles_geometry_cores_crops_and_exact_cover() {
+        let (w, h) = (1500u32, 2400u32);
         let mut mask = GrayImage::new(w, h);
-        rect(&mut mask, 50, 100, 200, 160); // ilk dilim
-        rect(&mut mask, 300, 1750, 420, 1990); // sınırı aşan bileşen (1800/1707 civarı çekirdek sınırı)
-        rect(&mut mask, 100, 3400, 300, 3500);
-        rect(&mut mask, 10, 5050, 90, 5110);
-        let mut mk = Mock { calls: vec![] };
-        let out = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 0, flat_fill: false }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
-        assert!(mk.calls.len() >= 3, "{:?}", mk.calls);
-        assert!(mk.calls.iter().all(|c| c.0 == w), "tam genişlik");
+        rect(&mut mask, 50, 100, 200, 160); // küçük, gruplanır
+        rect(&mut mask, 220, 130, 300, 190); // yakın komşu: aynı karoya girer
+        rect(&mut mask, 1400, 2300, 1499, 2399); // sayfa köşesi
+        rect(&mut mask, 600, 500, 1300, 640); // 700 px geniş: 512'lik çekirdeklere bölünür
+        rect(&mut mask, 100, 1000, 700, 1800); // 600x800 dev bileşen
+        let spec = TileSpec::DEFAULT;
+        let (labels, tiles) = plan_tiles(&mask, &spec);
+        let mut covered = vec![0u8; (w * h) as usize];
+        for t in &tiles {
+            let [x0, y0, x1, y1] = t.core;
+            assert!(x1 - x0 <= 512 && y1 - y0 <= 512, "çekirdek 512'yi aştı {:?}", t.core);
+            let [cx0, cy0, cx1, cy1] = t.crop;
+            assert!(cx1 - cx0 <= 512 + 2 * 128 && cy1 - cy0 <= 512 + 2 * 128, "kırpıntı 768'i aştı {:?}", t.crop);
+            assert!(cx1 <= w && cy1 <= h);
+            // kırpıntı çekirdeği (sahip olunan pikselleri) bağlamla kapsar
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let l = labels[(y * w + x) as usize];
+                    if l != 0 && t.components.binary_search(&l).is_ok() {
+                        assert!(x >= cx0 && x < cx1 && y >= cy0 && y < cy1, "sahip piksel kırpıntı dışında");
+                        covered[(y * w + x) as usize] += 1;
+                    }
+                }
+            }
+        }
+        for (i, &c) in covered.iter().enumerate() {
+            let m = mask.as_raw()[i] >= 128;
+            assert_eq!(c, m as u8, "piksel {} {} kez kapsandı (maske {m})", i, c);
+        }
+        assert!(tiles.len() >= 6, "{}", tiles.len());
+    }
+
+    #[test]
+    fn tiled_clean_changes_only_masked_pixels_each_once() {
+        let (w, h) = (1100u32, 1700u32);
+        let img = RgbImage::from_fn(w, h, |x, y| Rgb([(x % 200) as u8, (y % 241) as u8, 7]));
+        let mut mask = GrayImage::new(w, h);
+        rect(&mut mask, 50, 100, 200, 160);
+        rect(&mut mask, 300, 1150, 900, 1300); // 600 geniş: iki çekirdek
+        rect(&mut mask, 900, 1600, 1000, 1690);
+        let mut mk = Mock::new();
+        let out = clean_image(&img, &mask, &params(0), None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        assert!(mk.calls.len() >= 3 && mk.calls.iter().all(|c| c.0 <= 768 && c.1 <= 768), "{:?}", mk.calls);
         for (x, y, p) in out.enumerate_pixels() {
-            let masked = mask.get_pixel(x, y)[0] >= 128;
-            if masked {
+            if mask.get_pixel(x, y)[0] >= 128 {
                 assert_eq!(*p, Rgb([255, 0, 255]), "maskeli piksel temizlenmedi {x},{y}");
             } else {
                 assert_eq!(p, img.get_pixel(x, y), "maske dışı değişti {x},{y}");
@@ -757,40 +692,54 @@ mod tests {
         }
     }
 
-    /// Her pikseli +1 oynatan model: redraw çıktısı model çıktısının kendisi olmalı (maske dışı dahil, karışım yok).
-    struct Shift;
-    impl Inpainter for Shift {
-        fn label(&self) -> String { "shift".into() }
-        fn policy(&self) -> WindowPolicy { WindowPolicy::Page { seg_h: 2000, overlap: 200, max_w: 2048, max_px: 6_300_000 } }
-        fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
-            let mut o = img.clone();
-            for (x, y, p) in o.enumerate_pixels_mut() {
-                *p = if mask.get_pixel(x, y)[0] >= 128 { Rgb([255, 0, 255]) } else { Rgb([p[0].saturating_add(1), p[1], p[2]]) };
-            }
-            Ok(o)
-        }
+    #[test]
+    fn tall_strip_is_tiles_not_whole_page() {
+        let (w, h) = (600u32, 5120u32);
+        let img = RgbImage::from_pixel(w, h, Rgb([10, 20, 30]));
+        let mut mask = GrayImage::new(w, h);
+        rect(&mut mask, 50, 100, 200, 160);
+        rect(&mut mask, 300, 3400, 420, 3500);
+        let mut mk = Mock::new();
+        clean_image(&img, &mask, &params(3), None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        assert_eq!(mk.calls.len(), 2);
+        assert!(mk.calls.iter().all(|c| c.1 < 400), "{:?}", mk.calls); // bütün sayfa/şerit gitmedi
     }
 
     #[test]
-    fn redraw_output_is_model_output_without_paste() {
-        for (w, h) in [(700u32, 900u32), (600, 5120)] {
-            let img = RgbImage::from_fn(w, h, |x, y| Rgb([(x % 200) as u8, (y % 241) as u8, 7]));
-            let mut mask = GrayImage::new(w, h);
-            rect(&mut mask, 50, 100, 200, 160);
-            rect(&mut mask, 300, 1750, 420, 1990.min(h - 1));
-            if h > 4100 { rect(&mut mask, 10, 4000, 90, 4050); } // her dilimde maske olsun 
-            let out = clean_image(&img, &mask, &CleanParams { dilation: 2, feather: 3, flat_fill: false }, None, &mut Shift, &AtomicBool::new(false), &|_, _| {}).unwrap();
-            assert_eq!(out.dimensions(), (w, h));
-            // maskeden uzakta her piksel modelin +1'i (özgün değil); maske içi macenta
-            for (x, y, p) in out.enumerate_pixels() {
-                let o = img.get_pixel(x, y);
-                if p == &Rgb([255, 0, 255]) {
-                    continue;
-                }
-                assert_eq!(*p, Rgb([o[0].saturating_add(1), o[1], o[2]]), "model çıktısı değil {x},{y}");
+    fn fixed_size_model_gets_smaller_cores() {
+        let img = RgbImage::from_pixel(900, 900, Rgb([10, 20, 30]));
+        let mut mask = GrayImage::new(900, 900);
+        rect(&mut mask, 100, 100, 700, 200);
+        let mut mk = Mock::new();
+        mk.spec = TileSpec { core: 256, ..TileSpec::DEFAULT };
+        clean_image(&img, &mask, &params(0), None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        assert!(mk.calls.len() >= 3 && mk.calls.iter().all(|c| c.0 <= 512 && c.1 <= 512), "{:?}", mk.calls);
+    }
+
+    #[test]
+    fn diffusion_tile_postprocess_keeps_outside_mask_and_cleans_text() {
+        // gri zemin + yazı; "difüzyon" modeli zemini 3 seviye koyulaştırıp maske içini düz gri yapar
+        struct Diff;
+        impl Inpainter for Diff {
+            fn label(&self) -> String { "diff".into() }
+            fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, ..TileSpec::DEFAULT } }
+            fn inpaint(&mut self, img: &RgbImage, _m: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
+                Ok(RgbImage::from_pixel(img.width(), img.height(), Rgb([197, 197, 197])))
             }
-            assert_eq!(*out.get_pixel(100, 130), Rgb([255, 0, 255]));
         }
+        let mut img = RgbImage::from_pixel(300, 200, Rgb([200, 200, 200]));
+        fill_rect(&mut img, 100, 90, 200, 100, Rgb([0, 0, 0]));
+        let mut mask = GrayImage::new(300, 200);
+        rect(&mut mask, 95, 85, 205, 105);
+        let out = clean_image(&img, &mask, &params(0), None, &mut Diff, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        for (x, y, p) in out.enumerate_pixels() {
+            if mask.get_pixel(x, y)[0] < 128 {
+                assert_eq!(p, img.get_pixel(x, y), "maske dışı değişti {x},{y}");
+            }
+        }
+        // yazı gitti; ışıklılık+ton eşleme sonrası zemin ~200 (modelin 197'si değil)
+        let p = out.get_pixel(150, 95);
+        assert!((p[0] as i32 - 200).abs() <= 3, "{p:?}");
     }
 
     fn fill_rect(img: &mut RgbImage, x0: u32, y0: u32, x1: u32, y1: u32, c: Rgb<u8>) {
@@ -814,7 +763,7 @@ mod tests {
         assert!(f.remaining.as_raw().iter().all(|&v| v == 0));
         assert!(f.work.pixels().all(|p| p[0] >= 250), "yazı kaldı");
         // model hiç çağrılmaz
-        let mut mk = Mock { calls: vec![] };
+        let mut mk = Mock::new();
         let out = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 2, flat_fill: true }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert!(mk.calls.is_empty());
         assert!(out.pixels().all(|p| p[0] >= 250));
@@ -830,7 +779,7 @@ mod tests {
         assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
         assert_eq!(f.remaining.as_raw(), mask.as_raw());
         assert_eq!(f.work.as_raw(), img.as_raw());
-        let mut mk = Mock { calls: vec![] };
+        let mut mk = Mock::new();
         clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 2, flat_fill: true }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert_eq!(mk.calls.len(), 1);
     }
@@ -935,26 +884,5 @@ mod tests {
         rect(&mut mask, 48, 88, 152, 102);
         assert_eq!(flat_pass(&img, &mask, 2, None).stats.flat, 1);
         assert_eq!(flat_pass(&img, &mask, 2, Some(&[])).stats, FlatStats { flat: 0, model: 1 }); // balon yok: balon dışı yazı modele
-    }
-
-    #[test]
-    fn normal_page_is_one_pass() {
-        let (w, h) = (1115u32, 1600u32);
-        let img = RgbImage::from_pixel(w, h, Rgb([10, 20, 30]));
-        let mut mask = GrayImage::new(w, h);
-        rect(&mut mask, 50, 100, 200, 160);
-        rect(&mut mask, 900, 1500, 1000, 1590);
-        let mut mk = Mock { calls: vec![] };
-        clean_image(&img, &mask, &CleanParams { dilation: 3, feather: 2, flat_fill: false }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
-        assert_eq!(mk.calls, vec![(w, h)]);
-    }
-
-    #[test]
-    fn too_wide_page_is_reported() {
-        let img = RgbImage::new(3000, 100);
-        let mask = GrayImage::new(3000, 100);
-        let mut mk = Mock { calls: vec![] };
-        let e = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 0, flat_fill: false }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap_err();
-        assert!(e.to_string().contains("geniş"));
     }
 }

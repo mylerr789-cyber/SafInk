@@ -4,7 +4,7 @@
 
 Kısa cevap: **LaMa Manga ile başlayın.** Desenli ya da çizimli zeminde kalan yazılar için **Qwen** kullanın.
 
-Hangi modeli seçerseniz seçin, düz renkli balonlar (beyaz, siyah, gri) modele hiç gitmez. SafInk bunları kendisi anında doldurur. Model yalnızca desenli ve çizimli yerlerde çalışır.
+Hangi modeli seçerseniz seçin, düz zeminli konuşma balonlarının içindeki yazı (beyaz, siyah, gri) modele hiç gitmez. SafInk balonları küçük bir bölütleme modeliyle bulur ve bunları kendisi anında doldurur. Model yalnızca desenli ve çizimli yerlerde çalışır.
 
 ## Karşılaştırma
 
@@ -16,6 +16,8 @@ Hangi modeli seçerseniz seçin, düz renkli balonlar (beyaz, siyah, gri) modele
 | **FLUX.2 Klein 4B** | Desenli arka planlar; AMD ve Intel kartlarda da çalışır | Büyük boşlukları "bir şey çizerek" doldurabilir (saç, gölge vb.) | ~13–17 sn/sayfa | 6 GB+ VRAM | ~5.5 GB |
 
 \* Süreler RTX 4060 Ti 16 GB'ta ölçüldü. Yalnızca modele giden sayfalar için geçerlidir. Düz balonlu sayfalar modelden geçmediği için anında biter.
+
+**Model sayfanın tamamını değil, yalnızca yazılı yerleri işler.** Kalan yazılar kümelenir; her küme çevresiyle (128 px bağlam) birlikte, küçültülmeden, kendi çözünürlüğünde modele gider ve sonuç yalnızca yazının olduğu piksellere yazılır. Maske dışında hiçbir piksel değişmez; uzun webtoon şeritleri de aynı yolla işlenir. Ölçüm (1115×1600 sayfa, RTX 4060 Ti 16 GB): Qwen ~49 sn → ~28 sn, Klein ~17 sn → ~14 sn, LaMa ~1 sn (değişmedi).
 
 ## Ekran kartınıza göre öneri
 

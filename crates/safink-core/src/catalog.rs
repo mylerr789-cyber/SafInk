@@ -65,7 +65,7 @@ pub struct ModelSpec {
     pub recommended: bool,
     #[serde(default)]
     pub hf_repo: String,
-    /// Modele özel sabitler: steps, guidance, cfg, sampler, input_mode (original|green|lama_prefill), prompt / prompt_green / prompt_lama_prefill, offload, pipeline, max_width, max_pixels, seg_h, overlap.
+    /// Modele özel sabitler: steps, guidance, cfg, sampler, input_mode (original|green|lama_prefill), prompt / prompt_green / prompt_lama_prefill, offload, pipeline, multiple.
     #[serde(default)]
     pub params: serde_json::Value,
     /// "fast" dosya takımı seçilince `params` üzerine eklenen/ezilen değerler (örn. önbellek ayarı, nicemleme etiketi).

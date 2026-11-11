@@ -1,13 +1,11 @@
 //! ONNX Runtime (CPU) ile sabit 512x512 LaMa. NVIDIA dışı makinelerde kullanılır; DirectML bu modellerde çalışmadığı için kullanılmaz.
-use super::{Ctx, Inpainter, WindowPolicy};
+use super::{Ctx, Inpainter, TileSpec};
 use crate::catalog::ModelSpec;
 use crate::paths::AppPaths;
 use anyhow::{anyhow, bail, Result};
 use image::{GrayImage, RgbImage};
 use ort::{ep, session::Session, value::Tensor};
 use std::sync::OnceLock;
-
-const S: usize = 512;
 
 static ENV: OnceLock<std::result::Result<ort::environment::Environment, String>> = OnceLock::new();
 
@@ -33,6 +31,8 @@ pub struct OrtInpainter {
     pub provider: String,
     label: String,
     in_names: (String, String),
+    /// ONNX girişi sabit boyutluysa (örn. 512x512) kırpıntı o boyuta dolgulanır, karolar buna göre küçültülür; değilse 8'in katı.
+    fixed: Option<(u32, u32)>,
 }
 
 fn build(path: &std::path::Path) -> Result<Session> {
@@ -56,22 +56,46 @@ impl OrtInpainter {
         if names.len() < 2 {
             bail!("model 2 girişli olmalı (image, mask)");
         }
-        Ok(Self { label: format!("{} [CPU]", spec.name), session, adapter, provider: "cpu".into(), in_names: (names[0].clone(), names[1].clone()) })
+        let fixed = match session.inputs()[0].dtype() {
+            ort::value::ValueType::Tensor { shape, .. } => {
+                let d: Vec<i64> = shape.iter().copied().collect();
+                (d.len() == 4 && d[2] > 0 && d[3] > 0).then(|| (d[3] as u32, d[2] as u32))
+            }
+            _ => None,
+        };
+        Ok(Self { label: format!("{} [CPU]", spec.name), session, adapter, provider: "cpu".into(), in_names: (names[0].clone(), names[1].clone()), fixed })
     }
 }
 
 impl Inpainter for OrtInpainter {
     fn label(&self) -> String { self.label.clone() }
-    fn policy(&self) -> WindowPolicy { WindowPolicy::Fixed(S as u32) }
+    fn tile_spec(&self) -> TileSpec {
+        match self.fixed {
+            // sabit girişte kırpıntı (çekirdek + 2*bağlam) girişe sığmalı
+            Some((w, h)) => TileSpec { core: w.min(h).saturating_sub(2 * TileSpec::DEFAULT.context).max(64), ..TileSpec::DEFAULT },
+            None => TileSpec::DEFAULT,
+        }
+    }
 
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(std::sync::atomic::Ordering::Relaxed) {
             bail!(crate::loc::pick("iptal edildi", "cancelled"));
         }
-        assert_eq!(img.dimensions(), (S as u32, S as u32));
-        let plane = S * S;
-        let raw = img.as_raw();
-        let mraw = mask.as_raw();
+        let (w0, h0) = img.dimensions();
+        let (pw, ph) = match self.fixed {
+            Some((fw, fh)) => {
+                if w0 > fw || h0 > fh {
+                    bail!("kırpıntı ({w0}x{h0}) modelin sabit girişinden ({fw}x{fh}) büyük");
+                }
+                (fw, fh)
+            }
+            None => ((w0 + 7) / 8 * 8, (h0 + 7) / 8 * 8),
+        };
+        let (padded, pmask) = (super::pad_rgb(img, pw, ph), super::pad_gray(mask, pw, ph));
+        let (sw, sh) = (pw as usize, ph as usize);
+        let plane = sw * sh;
+        let raw = padded.as_raw();
+        let mraw = pmask.as_raw();
         let (n1, n2) = self.in_names.clone();
         let out_vals: Vec<f32>;
         match self.adapter {
@@ -83,8 +107,8 @@ impl Inpainter for OrtInpainter {
                     }
                 }
                 let m: Vec<f32> = mraw.iter().map(|&v| if v >= 128 { 1.0 } else { 0.0 }).collect();
-                let t1 = Tensor::from_array(([1usize, 3, S, S], x)).map_err(|e| anyhow!("{e}"))?;
-                let t2 = Tensor::from_array(([1usize, 1, S, S], m)).map_err(|e| anyhow!("{e}"))?;
+                let t1 = Tensor::from_array(([1usize, 3, sh, sw], x)).map_err(|e| anyhow!("{e}"))?;
+                let t2 = Tensor::from_array(([1usize, 1, sh, sw], m)).map_err(|e| anyhow!("{e}"))?;
                 let outs = self.session.run(ort::inputs![n1.as_str() => t1, n2.as_str() => t2]).map_err(|e| anyhow!("{e}"))?;
                 let (shape, data) = outs[0].try_extract_tensor::<f32>().map_err(|e| anyhow!("{e}"))?;
                 if data.len() != 3 * plane {
@@ -101,8 +125,8 @@ impl Inpainter for OrtInpainter {
                     }
                 }
                 let m: Vec<u8> = mraw.iter().map(|&v| if v >= 128 { 0 } else { 255 }).collect();
-                let t1 = Tensor::from_array(([1usize, 3, S, S], x)).map_err(|e| anyhow!("{e}"))?;
-                let t2 = Tensor::from_array(([1usize, 1, S, S], m)).map_err(|e| anyhow!("{e}"))?;
+                let t1 = Tensor::from_array(([1usize, 3, sh, sw], x)).map_err(|e| anyhow!("{e}"))?;
+                let t2 = Tensor::from_array(([1usize, 1, sh, sw], m)).map_err(|e| anyhow!("{e}"))?;
                 let outs = self.session.run(ort::inputs![n1.as_str() => t1, n2.as_str() => t2]).map_err(|e| anyhow!("{e}"))?;
                 let (shape, data) = outs[0].try_extract_tensor::<u8>().map_err(|e| anyhow!("{e}"))?;
                 if data.len() != 3 * plane {
@@ -111,13 +135,13 @@ impl Inpainter for OrtInpainter {
                 out_vals = data.iter().map(|&v| v as f32).collect();
             }
         }
-        let mut out = RgbImage::new(S as u32, S as u32);
+        let mut out = RgbImage::new(pw, ph);
         for i in 0..plane {
-            let px = out.get_pixel_mut((i % S) as u32, (i / S) as u32);
+            let px = out.get_pixel_mut((i % sw) as u32, (i / sw) as u32);
             for c in 0..3 {
                 px[c] = out_vals[c * plane + i].round().clamp(0.0, 255.0) as u8;
             }
         }
-        Ok(out)
+        super::crop_to(out, w0, h0, (pw, ph))
     }
 }
