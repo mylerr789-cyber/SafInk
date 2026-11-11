@@ -5,6 +5,9 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+## [0.5.1] - 2026-11-11
+
+- Yeni logo.
 - Uygulama yeni sürüme artık her açılışta ve açık kaldıkça 6 saatte bir bakıyor (eskiden günde bir kezdi, aynı gün çıkan sürüm görünmüyordu).
 - Dışa aktarma artık özgün dosyaların üzerine yazmıyor: çıktı klasörü özgün klasörle aynıysa uyarıp duruyor; aynı adlı iki bölüm birbirini ezmiyor ("Bölüm (2)").
 - Quick Clean'e görüntü olmayan dosya bırakmak önceki sonuçları silmiyor; dışa aktarılmamış temiz sayfalar varken yeni Quick Clean önce soruyor.
@@ -12,6 +15,8 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 - Günlük sınır, kimlik hatası veya sunucuya ulaşılamaması artık işi tek bir açık iletiyle durduruyor (her sayfada ayrı hata vermiyor).
 - Modeller sekmesinde "Kullan"dan sonra başka sekmeden Kaydet'e basmak seçilen modeli eskisine döndürmüyor.
 - Bir iş sürerken ayarları (model, düşük VRAM) değiştirmek artık çalışan sunucuyu kesmiyor; yeniden başlatma iş bitince yapılıyor. İş veya indirme sürerken model silme engelleniyor.
+
+*English:* New logo; export never overwrites your original files; Quick Clean no longer deletes earlier results when you drop non-image files; pages stay exportable after a mask edit; daily limit / sign-in / connection errors stop the job with one message; model choice in Preferences no longer reverts; changing settings mid-job no longer breaks the running job; update check on every launch.
 
 ## [0.5.0] - 2026-11-11
 

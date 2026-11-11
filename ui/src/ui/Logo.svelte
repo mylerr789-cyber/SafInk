@@ -1,16 +1,11 @@
 <script lang="ts">
-  // İşaret: kırmızı mühür karosu içinde mürekkep çerçeveli balon; son satır kırmızı kalemle silinir.
-  // Kelime işareti: SAFINK. Siyah mürekkep çubuğunda da okunur (karo kendi rengini taşır).
+  // İşaret: fırçayla kavis çizen anime kızı silüeti (docs/logo/mark-1024.png'den küçültülmüş).
+  // Kelime işareti: SAFINK.
+  import mark from '../assets/logo-mark.png';
   let { size = 26 }: { size?: number } = $props();
 </script>
 
 <span class="inline-flex items-center select-none whitespace-nowrap" style="gap:{Math.round(size * 0.3)}px">
-  <svg viewBox="0 0 64 64" width={size * 1.15} height={size * 1.15} aria-hidden="true" class="shrink-0">
-    <rect x="2" y="2" width="60" height="60" rx="9" fill="#e1341e" />
-    <path d="M14 13H50Q55 13 55 18V37Q55 42 50 42H32L17 54L20 42H14Q9 42 9 37V18Q9 13 14 13Z" fill="#fffdf8" stroke="#121212" stroke-width="3.5" stroke-linejoin="round" />
-    <rect x="16" y="20" width="32" height="5" rx="2.5" fill="#121212" />
-    <rect x="16" y="30" width="13" height="5" rx="2.5" fill="#121212" />
-    <path d="M30 36L48 27" stroke="#e1341e" stroke-width="5" stroke-linecap="round" />
-  </svg>
+  <img src={mark} alt="" aria-hidden="true" draggable="false" class="shrink-0" width={Math.round(size * 1.4)} height={Math.round(size * 1.4)} />
   <span class="disp leading-none" style="font-size:{size}px; letter-spacing:.03em">SAFINK</span>
 </span>
