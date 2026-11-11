@@ -1,4 +1,4 @@
-//! Sayfa temizleme hattı: genişlet -> grupla -> pencerele -> inpaint -> yalnızca maskeli pikselleri tüy ile geri yaz.
+//! Sayfa temizleme hattı: genişlet -> (düz doldur) -> LaMa: pencerele/inpaint/maskeli pikselleri tüyle geri yaz; redraw: tam sayfa model çıktısı (geri yazım yok).
 use crate::inpaint::{pad_gray, pad_rgb, Ctx, Inpainter, WindowPolicy};
 use crate::maskops::{self, Rect};
 use anyhow::{bail, Result};
@@ -388,14 +388,14 @@ fn label_components(mask: &GrayImage) -> (Vec<u32>, Vec<(i32, i32)>) {
 }
 
 /// Tam sayfa politikası: sayfa (ya da uzun şeritte en çok `seg_h` yüksekliğinde dikey dilimler) modele bütün olarak gider.
-/// Dilimler `overlap` kadar örtüşür; her maskeli piksel tam olarak bir dilimden geri yazılır. Bir yazı bileşeni sınırı
+/// Dilimler `overlap` kadar örtüşür; çıktı satırları modelin çıktısıdır (geri yazım/tüy yok), dilimler örtüşmenin ortasından sert kesimle birleşir. Bir yazı bileşeni sınırı
 /// aşarsa tamamı en çok pikselini içeren dilime verilir ve o dilimin penceresi bileşeni tam kapsayacak şekilde genişler.
 /// Ölçekleme yok: boyut kısıtını (16'nın katı) modelin kendisi dolgu ile sağlar. Sığmayan sayfa hata verir.
 #[allow(clippy::too_many_arguments)]
 fn clean_paged(
     img: &RgbImage,
     m: GrayImage,
-    p: &CleanParams,
+    _p: &CleanParams,
     inp: &mut dyn Inpainter,
     cancel: &AtomicBool,
     progress: &dyn Fn(usize, usize),
@@ -448,6 +448,26 @@ fn clean_paged(
         wins[s].0 = wins[s].0.min((spans[l].0 - 64).max(0));
         wins[s].1 = wins[s].1.max((spans[l].1 + 64).min(ihi));
     }
+    // dilim kesim satırları: varsayılan çekirdek sınırı (= örtüşmenin ortası); genişlemiş pencereler bileşeni tam kapsasın diye kayar
+    let mut cuts: Vec<i32> = vec![0; n + 1];
+    cuts[n] = ihi;
+    for k in 1..n {
+        let b = cores[k].0;
+        let mut cut = b;
+        // sınırı aşan bileşenin satırları sahibi olan dilimden gelsin (öbür dilim onu maskelemedi)
+        for l in 1..spans.len() {
+            if owner[l] == k && spans[l].0 < cut && spans[l].1 > b {
+                cut = cut.min(spans[l].0);
+            }
+        }
+        for l in 1..spans.len() {
+            if owner[l] == k - 1 && spans[l].1 > cut && spans[l].0 < b {
+                cut = cut.max(spans[l].1);
+            }
+        }
+        cuts[k] = cut.clamp(wins[k].0, wins[k - 1].1).max(cuts[k - 1]);
+    }
+    // Yeniden çizim modellerinde model çıktısı sayfanın kendisidir: geri yazım/tüy/karışım yok; şeritte dilimler sert kesimle birleşir.
     let mut work = img.clone();
     progress(0, n);
     for s in 0..n {
@@ -468,34 +488,20 @@ fn clean_paged(
                 }
             }
         }
-        if !any {
+        // maskesiz dilim de modelden geçer (şeritte tüm çıktı modelin çıktısı olsun; yoksa özgün/model sınırında görünür kesim olur)
+        if !any && n == 1 {
             progress(s + 1, n);
             continue;
         }
-        let crop = image::imageops::crop_imm(&work, 0, wy0 as u32, iw, rh).to_image();
+        let crop = image::imageops::crop_imm(img, 0, wy0 as u32, iw, rh).to_image();
         let out = inp.inpaint(&crop, &wm, &Ctx { cancel })?;
         if out.dimensions() != (iw, rh) {
             bail!("model beklenmeyen boyut döndürdü: {:?} (beklenen {}x{})", out.dimensions(), iw, rh);
         }
-        let alpha = maskops::feather_alpha(&wm, p.feather as f32);
-        for y in 0..rh {
+        let (c0, c1) = (cuts[s].max(wy0), cuts[s + 1].min(wy1));
+        for gy in c0..c1 {
             for x in 0..iw {
-                let a = alpha[(y * iw + x) as usize];
-                if a <= 0.004 {
-                    continue;
-                }
-                let gy = wy0 as u32 + y;
-                // başka dilimin maskesine ait piksellere dokunma (tek dilimden yazılır)
-                if wm.get_pixel(x, y)[0] < 128 && m.get_pixel(x, gy)[0] >= 128 {
-                    continue;
-                }
-                let o = *work.get_pixel(x, gy);
-                let nw = *out.get_pixel(x, y);
-                let mut px = o;
-                for c in 0..3 {
-                    px[c] = (o[c] as f32 * (1.0 - a) + nw[c] as f32 * a).round().clamp(0.0, 255.0) as u8;
-                }
-                work.put_pixel(x, gy, px);
+                work.put_pixel(x, gy as u32, *out.get_pixel(x, (gy - wy0) as u32));
             }
         }
         progress(s + 1, n);
@@ -537,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn strip_segments_paste_each_masked_pixel_once() {
+    fn strip_segments_stitch_with_hard_cut() {
         let (w, h) = (600u32, 5120u32);
         let img = RgbImage::from_fn(w, h, |x, y| Rgb([(x % 251) as u8, (y % 241) as u8, 7]));
         let mut mask = GrayImage::new(w, h);
@@ -556,6 +562,42 @@ mod tests {
             } else {
                 assert_eq!(p, img.get_pixel(x, y), "maske dışı değişti {x},{y}");
             }
+        }
+    }
+
+    /// Her pikseli +1 oynatan model: redraw çıktısı model çıktısının kendisi olmalı (maske dışı dahil, karışım yok).
+    struct Shift;
+    impl Inpainter for Shift {
+        fn label(&self) -> String { "shift".into() }
+        fn policy(&self) -> WindowPolicy { WindowPolicy::Page { seg_h: 2000, overlap: 200, max_w: 2048, max_px: 6_300_000 } }
+        fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
+            let mut o = img.clone();
+            for (x, y, p) in o.enumerate_pixels_mut() {
+                *p = if mask.get_pixel(x, y)[0] >= 128 { Rgb([255, 0, 255]) } else { Rgb([p[0].saturating_add(1), p[1], p[2]]) };
+            }
+            Ok(o)
+        }
+    }
+
+    #[test]
+    fn redraw_output_is_model_output_without_paste() {
+        for (w, h) in [(700u32, 900u32), (600, 5120)] {
+            let img = RgbImage::from_fn(w, h, |x, y| Rgb([(x % 200) as u8, (y % 241) as u8, 7]));
+            let mut mask = GrayImage::new(w, h);
+            rect(&mut mask, 50, 100, 200, 160);
+            rect(&mut mask, 300, 1750, 420, 1990.min(h - 1));
+            if h > 4100 { rect(&mut mask, 10, 4000, 90, 4050); } // her dilimde maske olsun 
+            let out = clean_image(&img, &mask, &CleanParams { dilation: 2, feather: 3, flat_fill: false }, &mut Shift, &AtomicBool::new(false), &|_, _| {}).unwrap();
+            assert_eq!(out.dimensions(), (w, h));
+            // maskeden uzakta her piksel modelin +1'i (özgün değil); maske içi macenta
+            for (x, y, p) in out.enumerate_pixels() {
+                let o = img.get_pixel(x, y);
+                if p == &Rgb([255, 0, 255]) {
+                    continue;
+                }
+                assert_eq!(*p, Rgb([o[0].saturating_add(1), o[1], o[2]]), "model çıktısı değil {x},{y}");
+            }
+            assert_eq!(*out.get_pixel(100, 130), Rgb([255, 0, 255]));
         }
     }
 

@@ -101,7 +101,7 @@ pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
 /// - `original`: sayfa olduğu gibi gider (maske modele verilmez),
 /// - `green`: maskeli (genişletilmiş) pikseller saf #00FF00 boyanır, komut "yeşil alanları kaldır" der,
 /// - `lama_prefill`: maske önce LaMa ile doldurulur (tam parça, 512 pencereli), Flux yalnızca düzeltir.
-/// Geri yazım (yalnızca maskeli pikseller, tüy) her kipte aynıdır. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
+/// Redraw modellerinde geri yazım yoktur: model çıktısı sayfanın kendisidir. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
 /// ortam değişkenleri katalog değerinin üstüne yazar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
