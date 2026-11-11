@@ -5,10 +5,13 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+## [0.6.0] - 2026-11-11
+
 - Temizleme artık sayfanın tamamını değil, yalnızca yazılı yerleri işliyor (LaMa, FLUX.2 Klein, Qwen hepsinde): yazılar kümelenir, her küme çevresiyle birlikte küçültülmeden modele gider ve sonuç yalnızca maskeli piksellere yazılır. Maske dışında tek piksel bile değişmiyor; eskiden yeniden çizim modelleri sayfanın tamamını baştan çiziyordu (balon çizgileri kayabiliyor, ince çizgiler değişiyordu). 1115×1600 sayfada Qwen ~49 sn → ~28 sn, Klein ~17 → ~14 sn.
 - Yeniden çizim (Klein/Qwen) çıktısına MangaTranslator'ın son işlemi eklendi: ışıklılık/renk eşleme, yazıya yakın piksellerin yapıştırılıp uzaktaki çizimin korunması ve ton eşleme.
-
 - Düz renk doldurma artık düz beyaz/siyah yazı alanlarını sunucudaki bir sınıflandırıcıyla (kendi verimizle eğitildi) belirliyor: yalnızca zemini saf beyaz ya da siyah olan yazılar modele gitmeden doldurulur; sanat, ton ya da gri zemin üstündeki yazı her zaman modele gider. Sunucu bilgisi yoksa eski halka kuralı kullanılır.
+
+*English:* Cleaning now processes only the text areas, at native resolution, and writes back only masked pixels — nothing outside the mask changes (Qwen ~49 s → ~28 s per page, much faster on long webtoon pages); MangaTranslator-style post-processing for Klein/Qwen; plain white/black text areas are now decided by a server-side classifier trained on our own data, text over art, tone or grey always goes to the model.
 
 ## [0.5.2] - 2026-11-11
 
