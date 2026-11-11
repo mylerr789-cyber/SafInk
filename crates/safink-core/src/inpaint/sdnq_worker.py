@@ -1,7 +1,7 @@
 """SafInk SDNQ worker: stdin'den JSON satırları okur, stdout'a JSON satırları yazar.
 
 Komutlar:
-  {"cmd":"load","dir":..., "pipeline":"Flux2KleinPipeline"|"FluxKontextPipeline", "low_vram":bool}  (true: grup bosaltma + dosemeli VAE; false: model_cpu_offload)
+  {"cmd":"load","dir":..., "pipeline":"Flux2KleinPipeline"|"FluxKontextPipeline", "low_vram":bool}  (true: Klein/Kontext ardisik CPU bosaltma, Qwen grup bosaltma + dosemeli VAE; false: model_cpu_offload)
   {"cmd":"edit","image":..., "out":..., "prompt":..., "steps":4, "guidance":1.0, "seed":1}
   {"cmd":"quit"}
 Not: TEST EDILMEDI (multi-GB model indirilmedi). Maske bu worker'da kullanilmaz; geri yazimi Rust tarafi
@@ -31,8 +31,12 @@ def load(msg):
     cls = getattr(diffusers, msg.get("pipeline", "Flux2KleinPipeline"))
     pipe = cls.from_pretrained(msg["dir"], torch_dtype=torch.bfloat16)
     if device == "cuda":
-        if msg.get("low_vram", True):
-            # MangaTranslator low-VRAM modu: yaprak duzeyi grup bosaltma (transformer + metin kodlayici RAM'den akitilir),
+        if msg.get("low_vram", True) and type(pipe).__name__ in ("Flux2KleinPipeline", "FluxKontextPipeline"):
+            # MangaTranslator low-VRAM (Klein/Kontext): ardisik CPU bosaltma (katman katman GPU'ya; 4-6 GB kartlar, yavas).
+            # Uretec zaten CPU'da (edit)
+            pipe.enable_sequential_cpu_offload()
+        elif msg.get("low_vram", True):
+            # MangaTranslator low-VRAM (Qwen/Flux3): yaprak duzeyi grup bosaltma (transformer + metin kodlayici RAM'den akitilir),
             # VAE GPU'da kalir ama dosemeli calisir
             from diffusers.hooks import apply_group_offloading
 

@@ -262,6 +262,8 @@ export const en: Record<Key, string> & Record<`${string}.one`, string> = {
   'fit.tight': 'May struggle a bit',
   'fit.no': 'Your graphics card may not be enough',
   'fit.slow': 'No graphics card, runs slowly',
+  'fit.lowvram': 'Very slow · low VRAM (runs on 4-6 GB cards)',
+  'fit.more': 'Needs more VRAM than this card has',
   'fit.fits': 'Suits your computer',
   'preset.fast': 'Fast – LaMa Manga',
   'preset.bold': 'Bold text – wide mask',

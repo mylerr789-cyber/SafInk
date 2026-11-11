@@ -9,7 +9,7 @@
     { kind: 'redraw', title: t('models.g_redraw'), sub: t('models.g_redraw_sub') },
   ]);
   const fit = $derived<Record<string, string>>({
-    fits: t('fit.fits'), tight: t('fit.tight'), no: t('fit.no'), slow: t('fit.slow'),
+    fits: t('fit.fits'), tight: t('fit.tight'), no: t('fit.no'), slow: t('fit.slow'), lowvram: t('fit.lowvram'), more: t('fit.more'),
   });
   let open = $state<Record<string, boolean>>({});
 
@@ -111,7 +111,7 @@
                   <div class="text-[13.5px] mt-1.5 leading-[1.4]">{modelDesc(m)}</div>
                   <div class="flex items-center gap-x-3 flex-wrap mono text-[11.5px] mt-2">
                     <span class="font-semibold">{m.installed ? t('models.on_disk', { size: fmtBytes(m.total_bytes) }) : t('models.to_download', { size: fmtBytes(m.download_bytes || m.total_bytes) })}</span>
-                    {#if fit[m.fit]}<span class="{m.fit === 'fits' ? 'muted' : 'text-red'}">{fit[m.fit]}</span>{/if}
+                    {#if fit[m.fit]}<span class="{m.fit === 'fits' || m.fit === 'lowvram' ? 'muted' : 'text-red'}">{fit[m.fit]}</span>{/if}
                     <button class="muted hover:text-ink inline-flex items-center" onclick={() => (open[m.id] = !open[m.id])}>
                       <ChevronRight size={12} class="transition-transform {open[m.id] ? 'rotate-90' : ''}" />{t('models.details')}
                     </button>

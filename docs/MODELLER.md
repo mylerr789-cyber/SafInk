@@ -20,7 +20,8 @@ Hangi modeli seçerseniz seçin, düz renkli balonlar (beyaz, siyah, gri) modele
 ## Ekran kartınıza göre öneri
 
 - **NVIDIA, 12 GB ve üstü:** önce LaMa Manga; çizimli yazılar için Qwen.
-- **NVIDIA, 6–12 GB:** önce LaMa Manga; gerekirse FLUX.2 Klein.
+- **NVIDIA, 8–12 GB:** önce LaMa Manga; gerekirse FLUX.2 Klein.
+- **NVIDIA, 4–6 GB:** LaMa Manga önerilir. İsterseniz FLUX.2 Klein 4B (NVIDIA) çok yavaş ama çalışır: Düşük VRAM modunda (bu kartlarda kendiliğinden açık) katman katman işlemci belleğinden akıtılır; 1115×1600 bir sayfada GPU belleği yalnızca ~2,7 GB artıyor (kapalıyken ~7,8 GB) ve çıktı birebir aynı. Süre ölçülen kartta 21 sn yerine 27 sn; 4 GB'lık eski kartlarda sayfa başına ~2 dakika bekleyin (MangaTranslator kullanıcı raporu). Sayfa küçültülmez. Qwen ve sd.cpp Klein bu kartlara yetmez.
 - **AMD / Intel:** LaMa Manga (işlemcide çalışır); gerekirse FLUX.2 Klein (Vulkan).
 - **Ekran kartı yok:** yalnızca LaMa Manga. Yeniden çizim modelleri işlemcide çok yavaştır.
 

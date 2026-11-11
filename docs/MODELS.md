@@ -20,7 +20,8 @@ Whatever model you pick, plain balloons (white, black, grey) never go to the mod
 ## Recommendation by graphics card
 
 - **NVIDIA, 12 GB or more:** LaMa Manga first; Qwen for text over artwork.
-- **NVIDIA, 6–12 GB:** LaMa Manga first; FLUX.2 Klein if needed.
+- **NVIDIA, 8–12 GB:** LaMa Manga first; FLUX.2 Klein if needed.
+- **NVIDIA, 4–6 GB:** LaMa Manga is recommended. FLUX.2 Klein 4B (NVIDIA) runs, but very slowly: Low VRAM mode (on automatically for these cards) streams the model layer by layer from system RAM. On a 1115×1600 page GPU memory rises by only ~2.7 GB (~7.8 GB with it off) and the output is byte-identical. Time was 27 s instead of 21 s on the measured card; expect ~2 minutes per page on old 4 GB cards (MangaTranslator user report). Pages are never downscaled. Qwen and sd.cpp Klein do not fit these cards.
 - **AMD / Intel:** LaMa Manga (runs on the CPU); FLUX.2 Klein if needed (Vulkan).
 - **No graphics card:** LaMa Manga only. Redraw models are very slow on the CPU.
 

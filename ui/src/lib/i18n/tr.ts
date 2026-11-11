@@ -249,6 +249,8 @@ export const tr = {
   'fit.tight': 'Biraz zorlanabilir',
   'fit.no': 'Ekran kartın yetmeyebilir',
   'fit.slow': 'Ekran kartı yok, yavaş çalışır',
+  'fit.lowvram': 'Çok yavaş · düşük VRAM (4-6 GB kartta çalışır)',
+  'fit.more': 'Bu kart için daha fazla VRAM gerekir',
   'fit.fits': 'Bilgisayarına uygun',
   'preset.fast': 'Hızlı – LaMa Manga',
   'preset.bold': 'Kalın yazı – geniş maske',

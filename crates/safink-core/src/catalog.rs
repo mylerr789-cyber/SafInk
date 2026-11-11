@@ -387,7 +387,7 @@ fn drm_gpu() -> Option<(String, bool, f64)> {
     best
 }
 
-/// "fits" | "tight" | "no" | "slow" | "unknown"
+/// "fits" | "tight" | "no" | "slow" | "unknown" | "lowvram" (SDNQ Klein, küçük NVIDIA: çok yavaş ama çalışır) | "more" (küçük kartta daha fazla VRAM gerekir)
 pub fn fit_hint(m: &ModelSpec, hw: &Hardware) -> &'static str {
     if m.kind == "runtime" || m.backend == "lama" {
         return "fits";
@@ -397,6 +397,10 @@ pub fn fit_hint(m: &ModelSpec, hw: &Hardware) -> &'static str {
     }
     if hw.vram_gb <= 0.0 {
         return "unknown";
+    }
+    // 8 GB altı NVIDIA: SDNQ Klein 4B düşük VRAM modunda (ardışık CPU boşaltma) 4 GB'da bile çalışır; diğerleri yetmez
+    if hw.nvidia() && hw.vram_gb < 8.0 {
+        return if m.id == "sdnq-flux2-klein-4b" && hw.vram_gb >= 3.5 { "lowvram" } else { "more" };
     }
     if hw.vram_gb >= m.min_vram_gb * 1.15 && (hw.ram_gb <= 0.0 || hw.ram_gb >= m.min_ram_gb) {
         "fits"
