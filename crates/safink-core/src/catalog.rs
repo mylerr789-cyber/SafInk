@@ -75,7 +75,7 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    pub fn load(paths: &AppPaths) -> Catalog {
+    pub fn load(paths: &AppPaths, low_vram: bool) -> Catalog {
         let mut c: Catalog = serde_json::from_str(EMBEDDED).expect("gömülü katalog geçersiz");
         if let Ok(b) = std::fs::read(paths.root.join("catalog.user.json")) {
             if let Ok(u) = serde_json::from_slice::<Catalog>(&b) {
@@ -86,7 +86,7 @@ impl Catalog {
             }
         }
         for m in c.models.iter_mut() {
-            m.resolve_tier(paths);
+            m.resolve_tier(paths, low_vram);
         }
         c
     }
@@ -99,8 +99,8 @@ pub const FAST_MIN_VRAM_GB: f64 = 15.0;
 impl ModelSpec {
     /// "fast"/"compact" dosya takımlarından birini seçer, ötekini listeden çıkarır. Fast: NVIDIA ve ≥ 16 GB VRAM; ancak
     /// bu makinede küçük takım eksiksiz kuruluysa ve fast takım değilse eski kurulum bozulmasın diye küçük takım kalır
-    /// (yeniden indirme yok; model silinip yeniden kurulunca fast gelir).
-    pub fn resolve_tier(&mut self, paths: &AppPaths) {
+    /// (yeniden indirme yok; model silinip yeniden kurulunca fast gelir). `low_vram` açıkken küçük takım tercih edilir.
+    pub fn resolve_tier(&mut self, paths: &AppPaths, low_vram: bool) {
         if !self.files.iter().any(|f| f.only == "fast" || f.only == "compact") {
             return;
         }
@@ -112,7 +112,9 @@ impl ModelSpec {
             marker_ok
                 && self.files.iter().filter(|f| f.only == tier || f.only.is_empty()).all(|f| std::fs::metadata(dir.join(&f.name)).map(|m| m.len() == f.size).unwrap_or(false))
         };
-        let fast = eligible && !(complete("compact") && !complete("fast"));
+        // düşük VRAM: küçük takım kuruluysa (ya da hiçbiri kuruluysa) o seçilir; yalnızca fast kuruluysa o kalır (indirme zorlanmaz)
+        let prefer_compact = low_vram && (complete("compact") || !complete("fast"));
+        let fast = eligible && !prefer_compact && !(complete("compact") && !complete("fast"));
         let (keep, drop) = if fast { ("fast", "compact") } else { ("compact", "fast") };
         self.files.retain(|f| f.only != drop);
         for f in self.files.iter_mut().filter(|f| f.only == keep) {

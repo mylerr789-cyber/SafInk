@@ -10,7 +10,7 @@ const emit = (payload: any) => subs.forEach((f) => f({ payload }));
 
 const settings: any = {
   confidence: 0.25, dilation: 2, feather: 4, model_id: 'lama-manga',
-  export_dir: '', export_format: 'original', export_quality: 92, api_rate_per_min: 24, hf_token: '', low_vram: false, flat_fill: true,
+  export_dir: '', export_format: 'original', export_quality: 92, api_rate_per_min: 24, hf_token: '', low_vram: false, low_vram_user_set: false, flat_fill: true,
   presets: [
     { id: 'fast', name: 'Hızlı – LaMa Manga', model_id: 'lama-manga', confidence: 0.25, dilation: 2, feather: 4 },
     { id: 'bold', name: 'Kalın yazı – geniş maske', model_id: 'lama-manga', confidence: 0.25, dilation: 6, feather: 6 },

@@ -24,6 +24,7 @@
     try {
       await api.saveSettings($state.snapshot(s));
       await app.reloadSettings();
+      app.reloadModels(); // düşük VRAM kipi dosya takımını değiştirebilir
       app.toast(t('prefs.saved'), 'ok');
     } catch (e) { app.toast(String(e), 'err'); }
   }
@@ -75,6 +76,7 @@
             <div class="prow">{@render row(t('prefs.dilation'), t('prefs.dilation_help'))}<Scrub bind:value={s.dilation} min={0} max={16} unit="px" width="220px" /></div>
             <div class="prow">{@render row(t('prefs.feather'), t('prefs.feather_help'))}<Scrub bind:value={s.feather} min={0} max={16} unit="px" width="220px" /></div>
             <div class="prow">{@render row(t('prefs.flat_fill'))}<Switch bind:checked={s.flat_fill} /></div>
+            <div class="prow">{@render row(t('prefs.low_vram'), t('prefs.low_vram_help'))}<Switch bind:checked={s.low_vram} /></div>
           {:else if app.prefsTab === 'export'}
             <div class="prow">{@render row(t('prefs.out_dir'), t('prefs.out_dir_help'))}
               <div class="flex gap-2"><input class="field w-[240px] mono text-[12px]" bind:value={s.export_dir} placeholder={t('prefs.out_dir_ph')} /><button class="btn" onclick={pickDir}>{t('prefs.browse')}</button></div></div>

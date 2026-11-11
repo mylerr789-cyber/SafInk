@@ -313,6 +313,8 @@ export const en: Record<Key, string> & Record<`${string}.one`, string> = {
   'prefs.feather': 'Edge feathering',
   'prefs.feather_help': 'Edge blend of the cleaned area',
   'prefs.flat_fill': 'Fill flat backgrounds directly',
+  'prefs.low_vram': 'Low VRAM',
+  'prefs.low_vram_help': 'Redraw models use less GPU memory, slower',
   'prefs.out_dir': 'Output folder',
   'prefs.out_dir_help': 'Asked every time if left empty',
   'prefs.out_dir_ph': 'ask every time',

@@ -1,7 +1,7 @@
 """SafInk SDNQ worker: stdin'den JSON satırları okur, stdout'a JSON satırları yazar.
 
 Komutlar:
-  {"cmd":"load","dir":..., "pipeline":"Flux2KleinPipeline"|"FluxKontextPipeline", "low_vram":bool}
+  {"cmd":"load","dir":..., "pipeline":"Flux2KleinPipeline"|"FluxKontextPipeline", "low_vram":bool}  (true: grup bosaltma + dosemeli VAE; false: model_cpu_offload)
   {"cmd":"edit","image":..., "out":..., "prompt":..., "steps":4, "guidance":1.0, "seed":1}
   {"cmd":"quit"}
 Not: TEST EDILMEDI (multi-GB model indirilmedi). Maske bu worker'da kullanilmaz; geri yazimi Rust tarafi
@@ -32,11 +32,24 @@ def load(msg):
     pipe = cls.from_pretrained(msg["dir"], torch_dtype=torch.bfloat16)
     if device == "cuda":
         if msg.get("low_vram", True):
-            pipe.enable_model_cpu_offload()
+            # MangaTranslator low-VRAM modu: yaprak duzeyi grup bosaltma (transformer + metin kodlayici RAM'den akitilir),
+            # VAE GPU'da kalir ama dosemeli calisir
+            from diffusers.hooks import apply_group_offloading
+
+            for m in (pipe.transformer, pipe.text_encoder):
+                apply_group_offloading(
+                    m, onload_device=torch.device("cuda"), offload_device=torch.device("cpu"),
+                    offload_type="leaf_level", use_stream=True,
+                )
+            pipe.vae.to("cuda")
+            try:
+                pipe.vae.enable_tiling(tile_sample_min_height=512, tile_sample_min_width=512)
+            except Exception:  # noqa: BLE001  (dosemeyi desteklemeyen VAE)
+                pass
         else:
-            pipe.to("cuda")
-    if msg.get("pipeline") == "QwenImage21Pipeline":
-        # MangaTranslator: bir ~1MP'lik VAE çözümü bile 8 GB'ı aşar; döşemeli kodlama/çözme
+            pipe.enable_model_cpu_offload()
+    if not (device == "cuda" and msg.get("low_vram", True)) and msg.get("pipeline") == "QwenImage21Pipeline":
+        # bir ~1MP'lik VAE cozumu bile 8 GB'i asar; dosemeli kodlama/cozme
         pipe.vae.enable_tiling(tile_sample_min_height=512, tile_sample_min_width=512)
 
 

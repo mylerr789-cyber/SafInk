@@ -133,7 +133,7 @@ impl InputPrep {
         };
         let prompt = std::env::var("SAFINK_PROMPT").ok().or_else(|| ps(key)).or_else(|| ps("prompt")).unwrap_or_else(|| "Remove all text.".into());
         let lama = if mode == InputMode::LamaPrefill {
-            let cat = crate::catalog::Catalog::load(paths);
+            let cat = crate::catalog::Catalog::load(paths, settings.low_vram);
             let lspec = cat.get("lama-manga").ok_or_else(|| anyhow::anyhow!("lama-manga kataloğda yok"))?.clone();
             Some(create(paths, &lspec, settings)?)
         } else {

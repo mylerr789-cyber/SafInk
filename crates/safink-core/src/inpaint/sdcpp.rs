@@ -20,6 +20,7 @@ pub struct SdCppInpainter {
     prep: super::InputPrep,
     /// sd-server kullanılabilir (kurulu, açık ve başlatma başarısız olmadı).
     use_server: bool,
+    low_vram: bool,
 }
 
 const SEED: i64 = 1;
@@ -47,7 +48,7 @@ impl SdCppInpainter {
         let model_paths = spec.active_files().into_iter().map(|f| (f.role.clone(), spec.dir(paths).join(&f.name))).collect();
         let prep = super::InputPrep::new(paths, spec, settings)?;
         let use_server = super::sdserver::enabled() && super::sdserver::server_exe(&exe).is_some();
-        let mut me = Self { exe, workdir, spec: spec.clone(), model_paths, counter: 0, prep, use_server };
+        let mut me = Self { exe, workdir, spec: spec.clone(), model_paths, counter: 0, prep, use_server, low_vram: settings.low_vram };
         if me.use_server {
             if let Err(e) = me.server_port(cancel, progress) {
                 if cancel.load(Ordering::Relaxed) {
@@ -102,9 +103,17 @@ impl SdCppInpainter {
                 p("--cache-option", format!("threshold={th}"));
             }
         }
-        // 24 GB+ ekran kartında ağırlıklar VRAM'de kalır (daha hızlı); altında RAM'e boşaltılır
-        if self.spec.params.get("offload").and_then(|v| v.as_bool()).unwrap_or(true) && crate::catalog::hardware().vram_gb < 23.5 {
+        // 24 GB+ ekran kartında ağırlıklar VRAM'de kalır (daha hızlı); altında RAM'e boşaltılır. Düşük VRAM kipi her zaman boşaltır.
+        if self.spec.params.get("offload").and_then(|v| v.as_bool()).unwrap_or(true) && (self.low_vram || crate::catalog::hardware().vram_gb < 23.5) {
             a.push("--offload-to-cpu".into());
+        }
+        // Düşük VRAM: döşemeli VAE (kodlama+çözme). Döşeme boyutu modele göre ölçüldü: Qwen'de varsayılan 256 sayfada gri leke
+        // üretti, 384 temiz ve çıktı tepe belleği ~3 GB düşük; metin kodlayıcıyı/VAE'yi CPU'ya almak (--backend te=cpu / vae=cpu)
+        // Qwen'de 80 sn / Klein'da 5 dk ekledi, bu yüzden kullanılmaz.
+        if self.low_vram {
+            a.push("--vae-tiling".into());
+            a.push("--vae-tile-size".into());
+            a.push((self.pf("vae_tile", 512.0) as u32).to_string().into());
         }
         a.push("--flash-attn".into());
         a.push("on".into());

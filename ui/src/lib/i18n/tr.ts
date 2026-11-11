@@ -300,6 +300,8 @@ export const tr = {
   'prefs.feather': 'Kenar yumuşatma',
   'prefs.feather_help': 'Temizlenen alanın kenar geçişi',
   'prefs.flat_fill': 'Düz zeminleri doğrudan doldur',
+  'prefs.low_vram': 'Düşük VRAM',
+  'prefs.low_vram_help': 'Yeniden çizme modelleri daha az ekran belleği kullanır, daha yavaş',
   'prefs.out_dir': 'Çıktı klasörü',
   'prefs.out_dir_help': 'Boş bırakılırsa her seferinde sorulur',
   'prefs.out_dir_ph': 'her seferinde sor',

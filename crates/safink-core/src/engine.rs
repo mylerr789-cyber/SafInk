@@ -61,7 +61,7 @@ pub struct Engine {
     pub paths: AppPaths,
     pub db: Db,
     pub settings: RwLock<Settings>,
-    pub catalog: Catalog,
+    catalog: RwLock<Arc<Catalog>>,
     pub http: reqwest::Client,
     pub tiles: TileCache,
     emit: Arc<dyn Fn(Event) + Send + Sync>,
@@ -80,14 +80,14 @@ fn emit_page(e: &Engine, id: i64) {
 impl Engine {
     pub fn new(paths: AppPaths, emit: Arc<dyn Fn(Event) + Send + Sync>) -> Result<Arc<Self>> {
         let settings = Settings::load(&paths);
-        let catalog = Catalog::load(&paths);
+        let catalog = Catalog::load(&paths, settings.low_vram);
         let db = Db::open(&paths.db())?;
         let http = reqwest::Client::builder().user_agent("SafInk/0.1").connect_timeout(std::time::Duration::from_secs(30)).build()?;
         Ok(Arc::new(Self {
             paths,
             db,
             settings: RwLock::new(settings),
-            catalog,
+            catalog: RwLock::new(Arc::new(catalog)),
             http,
             tiles: TileCache::default(),
             emit,
@@ -100,12 +100,25 @@ impl Engine {
 
     pub fn emit(&self, e: Event) { (self.emit)(e) }
 
+    /// Geçerli (düşük VRAM ayarına göre dosya takımı çözülmüş) katalog.
+    pub fn catalog(&self) -> Arc<Catalog> { self.catalog.read().clone() }
+
     pub fn set_settings(&self, s: Settings) -> Result<()> {
+        let mut s = s;
+        let (model_changed, vram_changed) = {
+            let old = self.settings.read();
+            (old.model_id != s.model_id, old.low_vram != s.low_vram)
+        };
+        if vram_changed {
+            s.low_vram_user_set = true; // anahtar elle çevrildi: otomatik seçim artık ezmez
+        }
         s.save(&self.paths)?;
-        let model_changed = self.settings.read().model_id != s.model_id;
+        if vram_changed {
+            *self.catalog.write() = Arc::new(Catalog::load(&self.paths, s.low_vram));
+        }
         *self.settings.write() = s;
-        if model_changed {
-            inpaint::sdserver::shutdown(); // başka model seçildi: sd.cpp sunucusu belleği bıraksın
+        if model_changed || vram_changed {
+            inpaint::sdserver::shutdown(); // başka model/VRAM kipi: sd.cpp sunucusu yeni bayraklarla yeniden başlasın
         }
         Ok(())
     }
@@ -418,7 +431,7 @@ impl Engine {
 
         // model önceden doğrula (hata erken görünsün)
         let model_spec = if clean {
-            let m = self.catalog.get(&model_id).ok_or_else(|| anyhow!(crate::t!("model bulunamadı: {model_id}", "model not found: {model_id}")))?.clone();
+            let m = self.catalog().get(&model_id).ok_or_else(|| anyhow!(crate::t!("model bulunamadı: {model_id}", "model not found: {model_id}")))?.clone();
             if !m.is_installed(&self.paths) {
                 bail!(crate::t!("model kurulu değil: {} (Modeller bölümünden indirin)", "model not installed: {} (download it in Models)", m.name));
             }
@@ -617,13 +630,14 @@ impl Engine {
     pub fn hardware(&self) -> &'static Hardware { crate::catalog::hardware() }
 
     fn runtime_missing(&self, m: &ModelSpec) -> Vec<ModelSpec> {
-        m.runtime_ids().into_iter().filter_map(|id| self.catalog.get(id)).filter(|t| !t.is_installed(&self.paths)).cloned().collect()
+        let cat = self.catalog();
+        m.runtime_ids().into_iter().filter_map(|id| cat.get(id)).filter(|t| !t.is_installed(&self.paths)).cloned().collect()
     }
 
     pub fn models(&self) -> Vec<ModelView> {
         let hw = self.hardware();
-        self.catalog
-            .models
+        let cat = self.catalog();
+        cat.models
             .iter()
             .map(|m| {
                 let installed = m.is_installed(&self.paths);
@@ -644,7 +658,7 @@ impl Engine {
     /// Tek tuş: gerekli çalışma ortamı (sd.cpp derlemesi ya da Python ortamı) önce otomatik kurulur, sonra model indirilir.
     /// Arayüz yalnızca `id` için tek ilerleme çubuğu görür (`Download` olayları, `phase` ile Türkçe aşama adı).
     pub fn install_model(self: &Arc<Self>, id: &str) -> Result<()> {
-        let spec = self.catalog.get(id).ok_or_else(|| anyhow!(crate::loc::pick("model yok", "no such model")))?.clone();
+        let spec = self.catalog().get(id).ok_or_else(|| anyhow!(crate::loc::pick("model yok", "no such model")))?.clone();
         if !spec.visible() && spec.kind != "runtime" {
             bail!(crate::loc::pick("bu model bu bilgisayarda kullanılamaz", "this model cannot be used on this computer"));
         }
@@ -765,7 +779,8 @@ impl Engine {
     }
 
     pub fn remove_model(&self, id: &str) -> Result<()> {
-        let spec = self.catalog.get(id).ok_or_else(|| anyhow!("model yok"))?;
+        let cat = self.catalog();
+        let spec = cat.get(id).ok_or_else(|| anyhow!("model yok"))?;
         crate::download::remove(&self.paths, spec)
     }
 }

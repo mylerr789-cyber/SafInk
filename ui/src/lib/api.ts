@@ -13,7 +13,7 @@ export interface Preset { id: string; name: string; model_id: string; confidence
 export interface Settings {
   confidence: number; dilation: number; feather: number; model_id: string;
   export_dir: string; export_format: string; export_quality: number; api_rate_per_min: number; presets: Preset[];
-  hf_token: string; low_vram: boolean; flat_fill: boolean;
+  hf_token: string; low_vram: boolean; low_vram_user_set: boolean; flat_fill: boolean;
 }
 export interface FileSpec { name: string; role: string; url: string; sha256: string | null; size: number }
 export interface Model {

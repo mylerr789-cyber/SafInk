@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
         }),
     )?;
     let model = std::env::var("SAFINK_MODEL").unwrap_or_else(|_| "lama-manga".into());
-    let spec = eng.catalog.get(&model).unwrap().clone();
+    let spec = eng.catalog().get(&model).unwrap().clone();
     if !spec.is_installed(&eng.paths) {
         // uygulamanın kendi kurulum akışı: çalışma ortamı + model tek zincirde
         println!("kuruluyor: {}", spec.name);
@@ -54,6 +54,9 @@ async fn main() -> anyhow::Result<()> {
     s.model_id = model;
     if let Ok(d) = std::env::var("SAFINK_DILATION") {
         s.dilation = d.parse()?;
+    }
+    if let Ok(v) = std::env::var("SAFINK_LOW_VRAM") {
+        s.low_vram = v == "1";
     }
     eng.set_settings(s)?;
     let cid = eng.quick_new(&images)?;
