@@ -5,6 +5,8 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+- Düz renk doldurma artık konuşma balonunu tanıyor (küçük bir balon bölütleme modeli, temizleme modeliyle birlikte otomatik iniyor): yalnızca düz zeminli bir balonun içindeki yazı modele gitmeden doldurulur; balon dışındaki yazı (anlatı kutusu, ses efekti, sanat üstü yazı) her zaman modele gider. Balon modeli yoksa eski halka kuralı kullanılır.
+
 ## [0.5.2] - 2026-11-11
 
 - Düz renk doldurma artık yazının altından çizgi, şerit ya da tram geçen yerleri silmiyor; bu yazılar modele gidiyor (önceden beyaz zeminde ama arkasından çizgi geçen yazılar beyazla kapatılıp çizgiyi de siliyordu).

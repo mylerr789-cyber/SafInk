@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use safink_core::{maskops, pipeline};
+use safink_core::{bubbles::BubbleDetector, maskops, pipeline};
 use sha2::{Digest, Sha256};
 
 fn main() {
@@ -19,7 +19,9 @@ fn main() {
             by_sha.insert(sha.to_string(), e.path());
         }
     }
-    let (mut tf, mut tm, mut pages) = (0, 0, 0);
+    // BUBBLE_ONNX verilirse balon kuralı da ölçülür (eski halka kuralıyla yan yana)
+    let mut det = std::env::var("BUBBLE_ONNX").ok().map(|p| BubbleDetector::new(std::path::Path::new(&p)).unwrap());
+    let (mut tf, mut tm, mut pages, mut bf, mut bm) = (0, 0, 0, 0, 0);
     for dir in &args[2..] {
         let mut stack = vec![PathBuf::from(dir)];
         while let Some(d) = stack.pop() {
@@ -43,16 +45,26 @@ fn main() {
                 }
                 let m = maskops::dilate(&m, 2);
                 let f = pipeline::flat_fill(&img, &m, 4, &pipeline::FLAT_CFG);
-                println!("{}\tflat={}\tmodel={}", p.display(), f.stats.flat, f.stats.model);
+                let mut line = format!("{}	ring flat={} model={}", p.display(), f.stats.flat, f.stats.model);
+                let mut work = f.work;
+                if let Some(d) = det.as_mut() {
+                    let b = d.detect(&img).unwrap();
+                    let g = pipeline::flat_fill_bubbles(&img, &m, 4, &b, &pipeline::FLAT_CFG);
+                    line += &format!("	bubble({}) flat={} model={}", b.len(), g.stats.flat, g.stats.model);
+                    bf += g.stats.flat;
+                    bm += g.stats.model;
+                    work = g.work;
+                }
+                println!("{line}");
                 tf += f.stats.flat;
                 tm += f.stats.model;
                 pages += 1;
                 let name = format!("{pages:03}_{}.png", p.file_stem().unwrap().to_string_lossy());
-                f.work.save(out.join(name)).unwrap();
+                work.save(out.join(name)).unwrap();
             }
         }
     }
-    println!("TOTAL pages={pages} flat={tf} model={tm}");
+    println!("TOTAL pages={pages} ring: flat={tf} model={tm} | bubble: flat={bf} model={bm}");
 }
 
 fn hex(b: &[u8]) -> String {

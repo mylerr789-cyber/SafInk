@@ -349,7 +349,7 @@ impl Engine {
     }
 
     /// Düz zeminler önce doldurulur; yalnızca kalan bileşenler varsa model (`make` ile tembel) yüklenir.
-    fn clean_page(&self, pid: i64, inp: &mut Option<Box<dyn inpaint::Inpainter>>, make: &mut dyn FnMut() -> Result<Box<dyn inpaint::Inpainter>>, params: &CleanParams, cancel: &AtomicBool, prog: &dyn Fn(usize, usize)) -> Result<()> {
+    fn clean_page(&self, pid: i64, bub: &mut crate::bubbles::BubbleSource, inp: &mut Option<Box<dyn inpaint::Inpainter>>, make: &mut dyn FnMut() -> Result<Box<dyn inpaint::Inpainter>>, params: &CleanParams, cancel: &AtomicBool, prog: &dyn Fn(usize, usize)) -> Result<()> {
         let page = self.db.page(pid)?.ok_or_else(|| anyhow!(crate::loc::pick("sayfa yok", "page not found")))?;
         let img = imgio::load_rgb(Path::new(&page.path))?;
         let mask = self.final_mask(&page)?;
@@ -357,9 +357,10 @@ impl Engine {
         let mask = if mask.dimensions() != (mw, mh) { image::imageops::resize(&mask, mw, mh, image::imageops::FilterType::Nearest) } else { mask };
         let m = maskops::dilate(&mask, params.dilation);
         let out = if params.flat_fill {
-            let f = crate::pipeline::flat_fill(&img, &m, params.feather, &crate::pipeline::FLAT_CFG);
+            let bubbles = bub.get(&self.paths, &page.sha256, &img);
+            let f = crate::pipeline::flat_pass(&img, &m, params.feather, bubbles.as_deref());
             if std::env::var_os("SAFINK_FLAT_LOG").is_some() {
-                eprintln!("[düz doldurma] sayfa {pid}: düz={} model={}", f.stats.flat, f.stats.model);
+                eprintln!("[düz doldurma] sayfa {pid}: düz={} model={} balon={}", f.stats.flat, f.stats.model, bubbles.as_ref().map(|b| b.len().to_string()).unwrap_or_else(|| "yok".into()));
             }
             if f.stats.model == 0 {
                 f.work
@@ -462,9 +463,17 @@ impl Engine {
             let ms = model_spec.clone().unwrap();
             let settings = self.settings.read().clone();
             let params2 = params.clone();
+            // balon bölütleyici yoksa bir kez sessizce indirmeyi dene (başarısızsa halka kuralı); yalnızca düz doldurma açıkken
+            let bubble_model = if params.flat_fill {
+                self.ensure_bubble_model(&ctl.cancel).await;
+                self.catalog().bubble_model(&self.paths)
+            } else {
+                None
+            };
             Some(tokio::task::spawn_blocking(move || {
                 let mut rx = rx;
                 let mut inp: Option<Box<dyn inpaint::Inpainter>> = None;
+                let mut bub = crate::bubbles::BubbleSource::new(bubble_model);
                 while let Some(pid) = rx.blocking_recv() {
                     while ctl2.paused.load(Ordering::Relaxed) && !ctl2.cancel.load(Ordering::Relaxed) {
                         mk2("paused");
@@ -479,6 +488,7 @@ impl Engine {
                     let mut create_err: Option<anyhow::Error> = None;
                     let r = me.clean_page(
                         pid,
+                        &mut bub,
                         &mut inp,
                         &mut || {
                             *msg2.lock() = crate::loc::pick("model yükleniyor…", "loading model…");
@@ -664,6 +674,27 @@ impl Engine {
     }
 
     // ---------------- modeller ----------------
+
+    /// Balon bölütleyici kurulu değilse (model önceden kurulmuştu) bir kez, sessizce ve en çok 90 sn indirmeyi dener.
+    /// Olay yayınlamaz; başarısızlık temizlemeyi engellemez (halka kuralına düşülür).
+    async fn ensure_bubble_model(&self, cancel: &AtomicBool) {
+        static TRIED: AtomicBool = AtomicBool::new(false);
+        if std::env::var("SAFINK_BUBBLES").map(|v| v == "0").unwrap_or(false) {
+            return;
+        }
+        let cat = self.catalog();
+        let Some(spec) = cat.get(crate::catalog::BUBBLE_MODEL_ID).cloned() else { return };
+        if spec.is_installed(&self.paths) || TRIED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let ch = crate::download::Chain { report_id: "", offset: 0, grand: 1, phase: "", last: false };
+        let r = tokio::time::timeout(std::time::Duration::from_secs(90), crate::download::install(&self.http, &self.paths, &spec, "", cancel, &ch, &|_| {})).await;
+        match r {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::warn!("balon modeli indirilemedi: {e}"),
+            Err(_) => tracing::warn!("balon modeli indirme zaman aşımı"),
+        }
+    }
 
     pub fn hardware(&self) -> &'static Hardware { crate::catalog::hardware() }
 

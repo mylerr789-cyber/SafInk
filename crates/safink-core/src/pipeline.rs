@@ -1,4 +1,5 @@
 //! Sayfa temizleme hattı: genişlet -> (düz doldur) -> LaMa: pencerele/inpaint/maskeli pikselleri tüyle geri yaz; redraw: tam sayfa model çıktısı (geri yazım yok).
+use crate::bubbles::Bubble;
 use crate::inpaint::{pad_gray, pad_rgb, Ctx, Inpainter, WindowPolicy};
 use crate::maskops::{self, Rect};
 use anyhow::{bail, Result};
@@ -226,6 +227,146 @@ pub fn flat_fill(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg) -> Fl
     FlatOut { work, remaining, stats }
 }
 
+/// Koharu/BallonsTranslator kuralı: balonun maske dışı, kenardan ≥ `BUBBLE_EDGE_MARGIN` px içerideki pikselleri (≥ `BUBBLE_MIN_PIXELS`) düzse
+/// (kanal başına ortancadan standart sapma < 10; kanal sapmaları birbirinden >1 ayrışıyorsa < 7) balon içindeki maske pikselleri
+/// ortanca renkle doldurulur. Balon dışında kalan yazı ve düz olmayan balonlar modele gider.
+pub const BUBBLE_EDGE_MARGIN: u32 = 3;
+pub const BUBBLE_MIN_PIXELS: usize = 16;
+const EDGE_PAD: u32 = 4;
+
+fn median_u8(v: &mut [u8]) -> u8 {
+    v.sort_unstable();
+    let mid = v.len() / 2;
+    if v.len() % 2 == 0 { ((v[mid - 1] as u16 + v[mid] as u16) / 2) as u8 } else { v[mid] }
+}
+
+/// Balonun düz zemin rengi (maske dışı iç pikseller); düz değilse `None`.
+fn bubble_uniform_color(img: &RgbImage, pending: &GrayImage, b: &Bubble) -> Option<[u8; 3]> {
+    let [bx0, by0, _, _] = b.bounds;
+    let (bw, bh) = (b.w(), b.h());
+    let m = EDGE_PAD;
+    // kenara uzaklık: balonun dışı 255, içi 0 -> disk genişletme -> 0 kalanlar kenardan >= margin içeride
+    let mut outside = GrayImage::from_pixel(bw + 2 * m, bh + 2 * m, image::Luma([255]));
+    for y in 0..bh {
+        for x in 0..bw {
+            if b.mask[(y * bw + x) as usize] != 0 {
+                outside.put_pixel(x + m, y + m, image::Luma([0]));
+            }
+        }
+    }
+    let near = maskops::dilate(&outside, BUBBLE_EDGE_MARGIN);
+    let (iw, ih) = img.dimensions();
+    let mut ch = [Vec::new(), Vec::new(), Vec::new()];
+    for y in 0..bh {
+        for x in 0..bw {
+            if near.get_pixel(x + m, y + m)[0] >= 128 {
+                continue;
+            }
+            let (gx, gy) = (bx0 + x, by0 + y);
+            // sayfa kenarına değen balon: sayfanın dışı da "kenar" sayılır
+            if gx < BUBBLE_EDGE_MARGIN || gy < BUBBLE_EDGE_MARGIN || gx + BUBBLE_EDGE_MARGIN >= iw || gy + BUBBLE_EDGE_MARGIN >= ih {
+                continue;
+            }
+            if pending.get_pixel(gx, gy)[0] >= 128 {
+                continue;
+            }
+            let p = img.get_pixel(gx, gy);
+            for k in 0..3 {
+                ch[k].push(p[k]);
+            }
+        }
+    }
+    if ch[0].len() < BUBBLE_MIN_PIXELS {
+        return None;
+    }
+    let med = [median_u8(&mut ch[0]), median_u8(&mut ch[1]), median_u8(&mut ch[2])];
+    let dev: Vec<f64> = (0..3).map(|k| (ch[k].iter().map(|&v| (v as f64 - med[k] as f64).powi(2)).sum::<f64>() / ch[k].len() as f64).sqrt()).collect();
+    let mean = dev.iter().sum::<f64>() / 3.0;
+    let spread = (dev.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / 3.0).sqrt();
+    let thr = if spread > 1.0 { 7.0 } else { 10.0 };
+    (dev.iter().cloned().fold(0.0, f64::max) < thr).then_some(med)
+}
+
+/// Balon tabanlı düz doldurma. `m`: genişletilmiş maske. Yalnızca düz bir balonun içindeki maske pikselleri doldurulur (tüylü kenar balon içinde kalır).
+pub fn flat_fill_bubbles(img: &RgbImage, m: &GrayImage, feather: u32, bubbles: &[Bubble], c: &FlatCfg) -> FlatOut {
+    let (w, h) = img.dimensions();
+    let mut work = img.clone();
+    let mut pending = m.clone();
+    for b in bubbles {
+        let [bx0, by0, bx1, by1] = b.bounds;
+        let (bx1, by1) = (bx1.min(w), by1.min(h));
+        let mut targets: Vec<(u32, u32)> = Vec::new();
+        for y in by0..by1 {
+            for x in bx0..bx1 {
+                if pending.get_pixel(x, y)[0] >= 128 && b.contains(x, y) {
+                    targets.push((x, y));
+                }
+            }
+        }
+        if targets.is_empty() {
+            continue;
+        }
+        let Some(col) = bubble_uniform_color(img, &pending, b) else { continue };
+        let fpad = (feather as f32 * 1.2).ceil() as i32 * 3 + 2;
+        let (fx0, fy0) = ((bx0 as i32 - fpad).max(0), (by0 as i32 - fpad).max(0));
+        let (fx1, fy1) = ((bx1 as i32 + fpad).min(w as i32), (by1 as i32 + fpad).min(h as i32));
+        let (fw, fh) = ((fx1 - fx0) as u32, (fy1 - fy0) as u32);
+        let mut tm = GrayImage::new(fw, fh);
+        for &(x, y) in &targets {
+            tm.put_pixel(x - fx0 as u32, y - fy0 as u32, image::Luma([255]));
+        }
+        let alpha = maskops::feather_alpha(&tm, feather as f32);
+        for y in 0..fh {
+            for x in 0..fw {
+                let a = alpha[(y * fw + x) as usize];
+                if a <= 0.004 {
+                    continue;
+                }
+                let (gx, gy) = (x + fx0 as u32, y + fy0 as u32);
+                let is_target = tm.get_pixel(x, y)[0] >= 128;
+                if !is_target {
+                    // tüy payı: yalnızca balonun içinde, maskesiz ve zemine benzeyen pikseller (balon çizgisi/sanat bozulmaz)
+                    if !b.contains(gx, gy) || pending.get_pixel(gx, gy)[0] >= 128 {
+                        continue;
+                    }
+                    let o = work.get_pixel(gx, gy);
+                    if (0..3).any(|k| (o[k] as i32 - col[k] as i32).abs() > c.outlier_dev) {
+                        continue;
+                    }
+                }
+                let o = *work.get_pixel(gx, gy);
+                let mut px = o;
+                for k in 0..3 {
+                    px[k] = (o[k] as f32 * (1.0 - a) + col[k] as f32 * a).round().clamp(0.0, 255.0) as u8;
+                }
+                work.put_pixel(gx, gy, px);
+            }
+        }
+        for &(x, y) in &targets {
+            pending.put_pixel(x, y, image::Luma([0]));
+        }
+    }
+    // istatistik: özgün maskenin bileşenleri; hiç kalan pikseli olmayan düz sayılır
+    let (labels, spans) = label_components(m);
+    let n = spans.len().saturating_sub(1);
+    let mut left = vec![false; n + 1];
+    for (i, &l) in labels.iter().enumerate() {
+        if l != 0 && pending.as_raw()[i] >= 128 {
+            left[l as usize] = true;
+        }
+    }
+    let model = left.iter().filter(|&&v| v).count();
+    FlatOut { work, remaining: pending, stats: FlatStats { flat: n - model, model } }
+}
+
+/// Düz doldurma geçişi: balonlar biliniyorsa Koharu kuralı, bilinmiyorsa (model yok/başarısız) halka kuralı.
+pub fn flat_pass(img: &RgbImage, m: &GrayImage, feather: u32, bubbles: Option<&[Bubble]>) -> FlatOut {
+    match bubbles {
+        Some(b) => flat_fill_bubbles(img, m, feather, b, &FLAT_CFG),
+        None => flat_fill(img, m, feather, &FLAT_CFG),
+    }
+}
+
 struct Win {
     /// Görüntü koordinatlarında kırpma bölgesi (görüntü içinde).
     rect: Rect,
@@ -310,6 +451,7 @@ pub fn clean_image(
     img: &RgbImage,
     mask: &GrayImage,
     p: &CleanParams,
+    bubbles: Option<&[Bubble]>,
     inp: &mut dyn Inpainter,
     cancel: &AtomicBool,
     progress: &dyn Fn(usize, usize),
@@ -320,7 +462,7 @@ pub fn clean_image(
     }
     let m = maskops::dilate(mask, p.dilation);
     if p.flat_fill {
-        let f = flat_fill(img, &m, p.feather, &FLAT_CFG);
+        let f = flat_pass(img, &m, p.feather, bubbles);
         if f.stats.model == 0 {
             return Ok(f.work);
         }
@@ -602,7 +744,7 @@ mod tests {
         rect(&mut mask, 100, 3400, 300, 3500);
         rect(&mut mask, 10, 5050, 90, 5110);
         let mut mk = Mock { calls: vec![] };
-        let out = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 0, flat_fill: false }, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        let out = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 0, flat_fill: false }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert!(mk.calls.len() >= 3, "{:?}", mk.calls);
         assert!(mk.calls.iter().all(|c| c.0 == w), "tam genişlik");
         for (x, y, p) in out.enumerate_pixels() {
@@ -637,7 +779,7 @@ mod tests {
             rect(&mut mask, 50, 100, 200, 160);
             rect(&mut mask, 300, 1750, 420, 1990.min(h - 1));
             if h > 4100 { rect(&mut mask, 10, 4000, 90, 4050); } // her dilimde maske olsun 
-            let out = clean_image(&img, &mask, &CleanParams { dilation: 2, feather: 3, flat_fill: false }, &mut Shift, &AtomicBool::new(false), &|_, _| {}).unwrap();
+            let out = clean_image(&img, &mask, &CleanParams { dilation: 2, feather: 3, flat_fill: false }, None, &mut Shift, &AtomicBool::new(false), &|_, _| {}).unwrap();
             assert_eq!(out.dimensions(), (w, h));
             // maskeden uzakta her piksel modelin +1'i (özgün değil); maske içi macenta
             for (x, y, p) in out.enumerate_pixels() {
@@ -673,7 +815,7 @@ mod tests {
         assert!(f.work.pixels().all(|p| p[0] >= 250), "yazı kaldı");
         // model hiç çağrılmaz
         let mut mk = Mock { calls: vec![] };
-        let out = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 2, flat_fill: true }, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        let out = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 2, flat_fill: true }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert!(mk.calls.is_empty());
         assert!(out.pixels().all(|p| p[0] >= 250));
     }
@@ -689,7 +831,7 @@ mod tests {
         assert_eq!(f.remaining.as_raw(), mask.as_raw());
         assert_eq!(f.work.as_raw(), img.as_raw());
         let mut mk = Mock { calls: vec![] };
-        clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 2, flat_fill: true }, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 2, flat_fill: true }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert_eq!(mk.calls.len(), 1);
     }
 
@@ -736,6 +878,65 @@ mod tests {
         assert_eq!(f.work.as_raw(), img.as_raw(), "şerit silindi");
     }
 
+    fn ellipse_bubble(cx: f32, cy: f32, rx: f32, ry: f32) -> Bubble {
+        let b = [(cx - rx) as u32 - 1, (cy - ry) as u32 - 1, (cx + rx) as u32 + 2, (cy + ry) as u32 + 2];
+        Bubble::from_fn(b, |x, y| ((x as f32 - cx) / rx).powi(2) + ((y as f32 - cy) / ry).powi(2) <= 1.0)
+    }
+
+    #[test]
+    fn koharu_rule_fills_uniform_bubble_only_inside() {
+        let mut img = RgbImage::from_pixel(300, 200, Rgb([200, 200, 200]));
+        let bub = ellipse_bubble(100.0, 100.0, 70.0, 60.0);
+        for y in 0..200 {
+            for x in 0..300 {
+                if bub.contains(x, y) {
+                    img.put_pixel(x, y, Rgb([255, 255, 255]));
+                }
+            }
+        }
+        fill_rect(&mut img, 70, 95, 130, 105, Rgb([0, 0, 0])); // balon içi yazı
+        fill_rect(&mut img, 220, 90, 270, 100, Rgb([0, 0, 0])); // balon dışı yazı
+        let mut mask = GrayImage::new(300, 200);
+        rect(&mut mask, 68, 93, 132, 107);
+        rect(&mut mask, 218, 88, 272, 102);
+        let f = flat_fill_bubbles(&img, &mask, 2, &[bub], &FLAT_CFG);
+        assert_eq!(f.stats, FlatStats { flat: 1, model: 1 });
+        assert!(f.work.get_pixel(100, 100)[0] >= 250, "balon içi yazı silinmedi");
+        assert_eq!(*f.work.get_pixel(245, 95), Rgb([0, 0, 0]), "balon dışı yazıya dokunulmamalı");
+        assert_eq!(f.remaining.get_pixel(100, 100)[0], 0);
+        assert_eq!(f.remaining.get_pixel(245, 95)[0], 255);
+        // maske dışı hiçbir yer değişmedi (tüy payı dışında balon içi zemin zaten aynı renk)
+        for (x, y, p) in f.work.enumerate_pixels() {
+            if mask.get_pixel(x, y)[0] < 128 && !(60..140).contains(&x) {
+                assert_eq!(p, img.get_pixel(x, y));
+            }
+        }
+    }
+
+    #[test]
+    fn koharu_rule_bubble_with_stripe_goes_to_model() {
+        let mut img = RgbImage::from_pixel(300, 200, Rgb([255, 255, 255]));
+        let bub = ellipse_bubble(150.0, 100.0, 100.0, 70.0);
+        fill_rect(&mut img, 60, 60, 240, 66, Rgb([120, 120, 120])); // maskesiz şerit (tram/çizgi)
+        fill_rect(&mut img, 110, 98, 190, 108, Rgb([0, 0, 0]));
+        let mut mask = GrayImage::new(300, 200);
+        rect(&mut mask, 108, 96, 192, 110);
+        let f = flat_fill_bubbles(&img, &mask, 2, &[bub], &FLAT_CFG);
+        assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
+        assert_eq!(f.work.as_raw(), img.as_raw());
+        assert_eq!(f.remaining.as_raw(), mask.as_raw());
+    }
+
+    #[test]
+    fn no_bubbles_known_falls_back_to_ring_rule() {
+        let mut img = RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
+        fill_rect(&mut img, 50, 90, 150, 100, Rgb([0, 0, 0]));
+        let mut mask = GrayImage::new(200, 200);
+        rect(&mut mask, 48, 88, 152, 102);
+        assert_eq!(flat_pass(&img, &mask, 2, None).stats.flat, 1);
+        assert_eq!(flat_pass(&img, &mask, 2, Some(&[])).stats, FlatStats { flat: 0, model: 1 }); // balon yok: balon dışı yazı modele
+    }
+
     #[test]
     fn normal_page_is_one_pass() {
         let (w, h) = (1115u32, 1600u32);
@@ -744,7 +945,7 @@ mod tests {
         rect(&mut mask, 50, 100, 200, 160);
         rect(&mut mask, 900, 1500, 1000, 1590);
         let mut mk = Mock { calls: vec![] };
-        clean_image(&img, &mask, &CleanParams { dilation: 3, feather: 2, flat_fill: false }, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        clean_image(&img, &mask, &CleanParams { dilation: 3, feather: 2, flat_fill: false }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert_eq!(mk.calls, vec![(w, h)]);
     }
 
@@ -753,7 +954,7 @@ mod tests {
         let img = RgbImage::new(3000, 100);
         let mask = GrayImage::new(3000, 100);
         let mut mk = Mock { calls: vec![] };
-        let e = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 0, flat_fill: false }, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap_err();
+        let e = clean_image(&img, &mask, &CleanParams { dilation: 0, feather: 0, flat_fill: false }, None, &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap_err();
         assert!(e.to_string().contains("geniş"));
     }
 }

@@ -11,7 +11,7 @@ const S: usize = 512;
 
 static ENV: OnceLock<std::result::Result<ort::environment::Environment, String>> = OnceLock::new();
 
-fn env() -> Result<&'static ort::environment::Environment> {
+pub fn env() -> Result<&'static ort::environment::Environment> {
     ENV.get_or_init(|| ort::init().with_name("safink").build().map_err(|e| e.to_string()))
         .as_ref()
         .map_err(|e| anyhow!("ONNX Runtime başlatılamadı: {e}"))

@@ -177,6 +177,28 @@
    "files": []
   },
   {
+   "id": "tool-bubble-seg",
+   "name": "Balon bölütleyici (YOLO11n-seg)",
+   "backend": "tool",
+   "kind": "runtime",
+   "variant": "bubble",
+   "description": "Konuşma balonlarını bulur; balon içindeki yazı düz zeminde modele gitmeden doldurulur.",
+   "description_en": "Finds speech balloons; text inside a plain balloon is filled flat without running the model.",
+   "license": "CC-BY-NC-4.0",
+   "license_url": "https://huggingface.co/huyvux3005/manga109-segmentation-bubble",
+   "files": [
+    {
+     "name": "bubble-seg.onnx",
+     "role": "model",
+     "url": "https://github.com/mylerr789-cyber/SafInk/releases/download/models-v1/bubble-seg.onnx",
+     "sha256": "9a355fd86e0623fe496ba8e549a02694f403570df55a55aae7a60e7dc5153bd6",
+     "size": 11889393,
+     "only": "",
+     "os": ""
+    }
+   ]
+  },
+  {
    "id": "sdcpp-flux2-klein-4b",
    "name": "FLUX.2 Klein 4B",
    "backend": "sdcpp",
