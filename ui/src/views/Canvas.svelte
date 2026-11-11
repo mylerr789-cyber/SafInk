@@ -93,6 +93,9 @@
     await loadMasks(p, my);
     if (my !== token) return;
     await probeClean(p);
+    if (my !== token) return;
+    // temizlenmiş sayfa sonucu göstererek açılır; temizlenmemişse maske
+    app.compare = app.hasClean;
     ready = true;
     applyLayers();
     scheduleVisible();
