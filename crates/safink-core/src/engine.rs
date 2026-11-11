@@ -69,6 +69,8 @@ pub struct Engine {
     job_counter: AtomicU64,
     api: Mutex<Option<(u32, Arc<ApiClient>)>>,
     dl_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    /// İş sürerken ayar değişti: sd.cpp sunucusu iş bitince yeniden başlatılır.
+    restart_pending: AtomicBool,
 }
 
 fn emit_page(e: &Engine, id: i64) {
@@ -96,6 +98,7 @@ impl Engine {
             job_counter: AtomicU64::new(1),
             api: Mutex::new(None),
             dl_cancel: Mutex::new(HashMap::new()),
+            restart_pending: AtomicBool::new(false),
         }))
     }
 
@@ -119,7 +122,13 @@ impl Engine {
         }
         *self.settings.write() = s;
         if model_changed || vram_changed {
-            inpaint::sdserver::shutdown(); // başka model/VRAM kipi: sd.cpp sunucusu yeni bayraklarla yeniden başlasın
+            // başka model/VRAM kipi: sd.cpp sunucusu yeni bayraklarla yeniden başlasın; iş sürüyorsa iş bitince
+            let job = self.job.lock();
+            if job.is_some() {
+                self.restart_pending.store(true, Ordering::Relaxed);
+            } else {
+                inpaint::sdserver::shutdown();
+            }
         }
         Ok(())
     }
@@ -217,12 +226,6 @@ impl Engine {
 
     /// Quick Clean: önceki geçici bölümü siler, verilen dosya/klasörlerden yenisini kurar.
     pub fn quick_new(&self, inputs: &[PathBuf]) -> Result<i64> {
-        for pid in self.db.delete_quick_chapters()? {
-            for f in [self.paths.edit_file(pid), self.paths.cleaned_file(pid), self.paths.thumb_file(pid)] {
-                let _ = std::fs::remove_file(f);
-            }
-            self.tiles.invalidate(pid);
-        }
         let mut files = Vec::new();
         for p in inputs {
             if p.is_dir() {
@@ -233,6 +236,13 @@ impl Engine {
         }
         if files.is_empty() {
             bail!(crate::loc::pick("görüntü bulunamadı", "no images found"));
+        }
+        // girdi doğrulandı: önceki geçici bölüm ancak şimdi silinir
+        for pid in self.db.delete_quick_chapters()? {
+            for f in [self.paths.edit_file(pid), self.paths.cleaned_file(pid), self.paths.thumb_file(pid)] {
+                let _ = std::fs::remove_file(f);
+            }
+            self.tiles.invalidate(pid);
         }
         let mid = self.db.ensure_manga("__quick__")?;
         let name = format!("Quick Clean {}", chrono_like_stamp());
@@ -403,6 +413,9 @@ impl Engine {
                 Err(e) => ("error", e.to_string()),
             };
             *me.job.lock() = None;
+            if me.restart_pending.swap(false, Ordering::Relaxed) {
+                inpaint::sdserver::shutdown();
+            }
             me.emit(Event::Job { job_id: id, mode: spec.mode.clone(), total: spec.page_ids.len(), fetched: 0, cleaned: 0, failed: 0, current: None, state: state.into(), message: msg, wait_secs: 0.0 });
         });
         Ok(id)
@@ -558,16 +571,17 @@ impl Engine {
                     if ctl.cancel.load(Ordering::Relaxed) {
                         break;
                     }
-                    failed.fetch_add(1, Ordering::Relaxed);
-                    let _ = me.db.set_status(pid, "error", &e.to_string());
-                    emit_page(&me, pid);
-                    if e.to_string().contains("API anahtarı") {
+                    if crate::api::is_fatal(&e) {
+                        // günlük sınır / kimlik / sunucuya ulaşılamıyor: her sayfada tekrar etmesin, iş tek iletiyle dursun
                         drop(tx);
                         if let Some(c) = consumer {
                             let _ = c.await;
                         }
                         return Err(e);
                     }
+                    failed.fetch_add(1, Ordering::Relaxed);
+                    let _ = me.db.set_status(pid, "error", &e.to_string());
+                    emit_page(&me, pid);
                 }
             }
             mk("running");
@@ -582,19 +596,30 @@ impl Engine {
     // ---------------- dışa aktarma ----------------
 
     pub fn export(&self, page_ids: &[i64], out_dir: &Path, format: &str, quality: u8) -> Result<(usize, usize, PathBuf)> {
-        let mut ok = 0;
         let mut skipped = 0;
         let mut used: HashMap<(i64, String), usize> = HashMap::new();
+        let mut dir_owner: HashMap<String, i64> = HashMap::new();
+        let mut chapter_dir: HashMap<i64, String> = HashMap::new();
+        // (sayfa, klasör, dosya adı, biçim, bölüm). Önce hepsi planlanıp özgün dosyaları ezme denetimi yapılır; ancak sonra yazılır.
+        let mut plan: Vec<(Page, PathBuf, String, String)> = Vec::new();
         for &pid in page_ids {
             let Some(page) = self.db.page(pid)? else { continue };
             let cf = self.paths.cleaned_file(pid);
-            if page.status != "cleaned" || !cf.exists() {
+            // "cleaned_stale": temizlendikten sonra maske değişti; eldeki temiz sonuç yine de aktarılır
+            if !matches!(page.status.as_str(), "cleaned" | "cleaned_stale") || !cf.exists() {
                 skipped += 1;
                 continue;
             }
-            let ch = self.db.get_chapter(page.chapter_id)?.map(|c| c.name).unwrap_or_else(|| "chapter".into());
-            let dir = out_dir.join(sanitize(&ch));
-            std::fs::create_dir_all(&dir)?;
+            let dname = match chapter_dir.get(&page.chapter_id) {
+                Some(d) => d.clone(),
+                None => {
+                    let ch = self.db.get_chapter(page.chapter_id)?.map(|c| c.name).unwrap_or_else(|| "chapter".into());
+                    let d = unique_dir_name(&mut dir_owner, &sanitize(&ch), page.chapter_id);
+                    chapter_dir.insert(page.chapter_id, d.clone());
+                    d
+                }
+            };
+            let dir = out_dir.join(dname);
             let src_ext = Path::new(&page.name).extension().and_then(|e| e.to_str()).unwrap_or("png").to_ascii_lowercase();
             let fmt = match format {
                 "original" => match src_ext.as_str() {
@@ -609,8 +634,20 @@ impl Engine {
             let n = used.entry((page.chapter_id, format!("{stem}.{ext}"))).or_insert(0);
             *n += 1;
             let fname = if *n > 1 { format!("{stem}_{}.{ext}", *n) } else { format!("{stem}.{ext}") };
-            let img = imgio::load_rgb(&cf)?;
-            let bytes = match fmt {
+            if export_hits_source(&dir, &fname, Path::new(&page.path)) {
+                bail!(crate::t!(
+                    "dışa aktarma durduruldu: çıktı özgün dosyanın üzerine yazacak veya özgün klasörle aynı ({}). Başka bir çıktı klasörü seçin.",
+                    "export stopped: the output would overwrite an original file or is the same as the original folder ({}). Choose a different output folder.",
+                    dir.display()
+                ));
+            }
+            plan.push((page, dir, fname, fmt.to_string()));
+        }
+        let mut ok = 0;
+        for (page, dir, fname, fmt) in plan {
+            std::fs::create_dir_all(&dir)?;
+            let img = imgio::load_rgb(&self.paths.cleaned_file(page.id))?;
+            let bytes = match fmt.as_str() {
                 "jpeg" => imgio::encode_jpeg(&img, quality)?,
                 "webp" => {
                     let mut buf = Vec::new();
@@ -781,7 +818,13 @@ impl Engine {
 
     pub fn remove_model(&self, id: &str) -> Result<()> {
         let cat = self.catalog();
-        let spec = cat.get(id).ok_or_else(|| anyhow!("model yok"))?;
+        let spec = cat.get(id).ok_or_else(|| anyhow!(crate::loc::pick("model yok", "no such model")))?;
+        if self.job.lock().is_some() {
+            bail!(crate::loc::pick("bir iş çalışırken model silinemez; işin bitmesini bekleyin", "cannot remove a model while a job is running; wait for it to finish"));
+        }
+        if self.dl_cancel.lock().contains_key(id) {
+            bail!(crate::loc::pick("bu model indiriliyor; önce indirmeyi iptal edin", "this model is downloading; cancel the download first"));
+        }
         crate::download::remove(&self.paths, spec)
     }
 }
@@ -792,7 +835,71 @@ fn sanitize(s: &str) -> String {
     if t.is_empty() { "chapter".into() } else { t }
 }
 
+/// Aynı adlı iki bölüm tek klasörde birbirini ezmesin: sonraki bölüme " (2)", " (3)" eklenir (büyük/küçük harf duyarsız).
+fn unique_dir_name(owner: &mut HashMap<String, i64>, base: &str, chapter_id: i64) -> String {
+    let mut n = 1;
+    loop {
+        let cand = if n == 1 { base.to_string() } else { format!("{base} ({n})") };
+        let key = cand.to_lowercase();
+        match owner.get(&key) {
+            Some(&c) if c != chapter_id => n += 1,
+            _ => {
+                owner.insert(key, chapter_id);
+                return cand;
+            }
+        }
+    }
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// Hedef dosya özgün dosyayla aynı mı ya da hedef klasör özgün dosyanın klasörü mü?
+fn export_hits_source(target_dir: &Path, target_name: &str, src: &Path) -> bool {
+    if same_path(&target_dir.join(target_name), src) {
+        return true;
+    }
+    match src.parent() {
+        Some(sd) => !sd.as_os_str().is_empty() && same_path(target_dir, sd),
+        None => false,
+    }
+}
+
 fn chrono_like_stamp() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     format!("{}", secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ayni_adli_bolumler_ayri_klasore_gider() {
+        let mut m = HashMap::new();
+        assert_eq!(unique_dir_name(&mut m, "Bölüm 1", 1), "Bölüm 1");
+        assert_eq!(unique_dir_name(&mut m, "Bölüm 1", 1), "Bölüm 1");
+        assert_eq!(unique_dir_name(&mut m, "bölüm 1", 2), "bölüm 1 (2)");
+        assert_eq!(unique_dir_name(&mut m, "Bölüm 1", 3), "Bölüm 1 (3)");
+    }
+
+    #[test]
+    fn disa_aktarma_ozgun_dosyayi_ezmez() {
+        let root = std::env::temp_dir().join(format!("safink_exp_{}", std::process::id()));
+        let src_dir = root.join("ozgun");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let src = src_dir.join("001.png");
+        std::fs::write(&src, b"x").unwrap();
+        // aynı klasör (başka uzantı olsa da) ve aynı dosya reddedilir
+        assert!(export_hits_source(&src_dir, "001.png", &src));
+        assert!(export_hits_source(&src_dir, "001.jpg", &src));
+        assert!(export_hits_source(&src_dir.join("..").join("ozgun"), "002.png", &src));
+        // başka klasör serbest
+        assert!(!export_hits_source(&root.join("cikti").join("ozgun"), "001.png", &src));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

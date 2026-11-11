@@ -11,7 +11,7 @@
   const pad = (n: number) => String(n).padStart(2, '0');
   const counts = $derived.by(() => {
     const c = { cleaned: 0, error: 0 };
-    for (const p of app.pages) { const s = app.statusOf(p); if (s === 'cleaned') c.cleaned++; else if (s === 'error') c.error++; }
+    for (const p of app.pages) { const s = app.statusOf(p); if (s === 'cleaned' || s === 'cleaned_stale') c.cleaned++; else if (s === 'error') c.error++; }
     return c;
   });
 
@@ -141,11 +141,12 @@
         {#if app.jobActive && app.job?.current === p.id}<span class="absolute left-1.5 top-1.5 tag tag-ink animate-pulse">{t('pages.processing')}</span>{/if}
         <span class="absolute left-0 top-0 w-7 h-7 grid place-items-center bg-ink text-paper hover:bg-red opacity-0 group-hover:opacity-100 cursor-pointer" data-nodrag role="button" tabindex="-1" aria-label={t('pages.remove')} data-tip="{t('pages.remove_tip')}  Del" data-tip-side="right"
           onclick={(e) => { e.stopPropagation(); app.deletePage(p.id); }} onkeydown={() => {}}><Trash2 size={13} /></span>
-        {#if st === 'cleaned'}<span class="absolute -right-2 top-2.5"><Stamp size={46} /></span>
+        {#if st === 'cleaned' || st === 'cleaned_stale'}<span class="absolute -right-2 top-2.5"><Stamp size={46} /></span>
         {:else if st === 'error'}<span class="absolute -right-1.5 top-3"><Stamp kind="error" size={46} /></span>{/if}
         <div class="mt-2 flex items-center justify-between gap-2">
           <span class="mono font-semibold text-[12px] {active ? 'bg-ink text-paper px-1' : ''}">P.{pad(i + 1)}</span>
           {#if st === 'mask_fetched' || (st === 'cleaned' && p.detections)}<span class="tag tag-red">{p.detections ? t('pages.masks', { n: p.detections }) : '—'}</span>
+          {:else if st === 'cleaned_stale'}<span class="tag tag-blue">{t('status.cleaned_stale')}</span>
           {:else if st === 'mask_edited'}<span class="tag tag-blue">{t('pages.fixed')}</span>
           {:else if st === 'new'}<span class="tag !border-ink3 text-ink3">{t('pages.new')}</span>{/if}
         </div>

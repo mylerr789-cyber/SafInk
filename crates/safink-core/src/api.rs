@@ -68,6 +68,31 @@ fn keyring_set(name: &str, v: &str) {
     let _ = ok;
 }
 
+/// İşi baştan sona durduran (sayfa sayfa denemenin anlamsız olduğu) API hatası. Metne bağlı değil: `is_fatal` ile tür üzerinden ayrılır.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FatalKind {
+    DailyLimit,
+    Auth,
+    Unreachable,
+}
+
+#[derive(Debug)]
+pub struct FatalApiError {
+    pub kind: FatalKind,
+    pub message: String,
+}
+
+impl std::fmt::Display for FatalApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.message) }
+}
+impl std::error::Error for FatalApiError {}
+
+fn fatal(kind: FatalKind, message: String) -> anyhow::Error { anyhow::Error::new(FatalApiError { kind, message }) }
+
+/// Hata zincirinde ölümcül API hatası varsa türünü döner.
+pub fn fatal_kind(e: &anyhow::Error) -> Option<FatalKind> { e.chain().find_map(|c| c.downcast_ref::<FatalApiError>()).map(|f| f.kind) }
+pub fn is_fatal(e: &anyhow::Error) -> bool { fatal_kind(e).is_some() }
+
 /// Kurulum başına anonim kimlik: install_id üretir, sunucudan jeton alır, saklar, süre dolunca yeniler.
 /// Jeton asla loglanmaz.
 struct DeviceAuth {
@@ -112,13 +137,21 @@ impl DeviceAuth {
             .json(&serde_json::json!({ "install_id": id }))
             .send()
             .await
-            .map_err(|e| anyhow!(crate::t!("sunucuya ulaşılamadı: {}", "could not reach the server: {}", e.without_url())))?;
+            .map_err(|e| {
+                let conn = e.is_connect();
+                let msg = crate::t!("sunucuya ulaşılamadı: {}", "could not reach the server: {}", e.without_url());
+                if conn { fatal(FatalKind::Unreachable, msg) } else { anyhow!(msg) }
+            })?;
         let st = res.status();
         if !st.is_success() {
             if st.as_u16() == 429 {
                 bail!(crate::loc::pick("Çok hızlı istek, birkaç dakika sonra tekrar deneyin", "Too many requests, try again in a few minutes"));
             }
-            bail!(crate::t!("Kimlik doğrulama başarısız (HTTP {})", "Authentication failed (HTTP {})", st.as_u16()));
+            let msg = crate::t!("Kimlik doğrulama başarısız (HTTP {})", "Authentication failed (HTTP {})", st.as_u16());
+            if matches!(st.as_u16(), 401 | 403) {
+                return Err(fatal(FatalKind::Auth, msg));
+            }
+            bail!(msg);
         }
         let v: serde_json::Value = res.json().await.map_err(|_| anyhow!(crate::loc::pick("Kimlik doğrulama yanıtı okunamadı", "Could not read the authentication response")))?;
         let tok = v["token"].as_str().ok_or_else(|| anyhow!(crate::loc::pick("Kimlik doğrulama yanıtı geçersiz", "Invalid authentication response")))?.to_string();
@@ -219,6 +252,7 @@ impl ApiClient {
         let url = format!("{}/v1/mask?confidence={:.2}", self.base, confidence.clamp(0.05, 0.95));
         let max_attempts = 6;
         let mut backoff = 2.0f64;
+        let mut unreachable;
         for attempt in 1..=max_attempts {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 bail!(crate::loc::pick("iptal edildi", "cancelled"));
@@ -237,6 +271,7 @@ impl ApiClient {
             let res = req.send().await;
             let retry_after: Option<f64>;
             let reason: String;
+            unreachable = false;
             match res {
                 Ok(r) => {
                     let st = r.status();
@@ -251,7 +286,7 @@ impl ApiClient {
                     let body = r.text().await.unwrap_or_default();
                     let body: String = body.chars().take(200).collect();
                     match st.as_u16() {
-                        429 if daily => bail!(crate::loc::pick("Günlük ücretsiz sınıra ulaşıldı, yarın tekrar deneyin", "Daily free limit reached, try again tomorrow")),
+                        429 if daily => return Err(fatal(FatalKind::DailyLimit, crate::loc::pick("Günlük ücretsiz sınıra ulaşıldı, yarın tekrar deneyin", "Daily free limit reached, try again tomorrow"))),
                         429 | 503 | 502 | 504 => {
                             if st.as_u16() == 429 {
                                 self.throttle.drain();
@@ -267,19 +302,21 @@ impl ApiClient {
                             self.auth.token(&self.http, &self.base, true).await?;
                             continue;
                         }
-                        401 | 403 => bail!(crate::t!("Kimlik doğrulanamadı (HTTP {}); biraz sonra tekrar deneyin", "Could not authenticate (HTTP {}); try again shortly", st.as_u16())),
+                        401 | 403 => return Err(fatal(FatalKind::Auth, crate::t!("Kimlik doğrulanamadı (HTTP {}); biraz sonra tekrar deneyin", "Could not authenticate (HTTP {}); try again shortly", st.as_u16()))),
                         413 => bail!(crate::loc::pick("dosya çok büyük (HTTP 413)", "file too large (HTTP 413)")),
                         c => bail!(crate::t!("API hatası HTTP {c}: {body}", "API error HTTP {c}: {body}")),
                     }
                 }
                 Err(e) if e.is_timeout() || e.is_connect() || e.is_request() => {
                     retry_after = None;
+                    unreachable = e.is_connect();
                     reason = crate::t!("Ağ hatası: {}", "Network error: {}", e.without_url());
                 }
                 Err(e) => return Err(e.without_url().into()),
             }
             if attempt == max_attempts {
-                bail!(crate::t!("{reason}; {max_attempts} deneme sonrası vazgeçildi", "{reason}; gave up after {max_attempts} attempts"));
+                let msg = crate::t!("{reason}; {max_attempts} deneme sonrası vazgeçildi", "{reason}; gave up after {max_attempts} attempts");
+                return Err(if unreachable { fatal(FatalKind::Unreachable, msg) } else { anyhow!(msg) });
             }
             let jitter = 1.0 + rand::random::<f64>() * 0.25;
             let wait = retry_after.unwrap_or(backoff * jitter).clamp(1.0, 120.0);
@@ -294,5 +331,21 @@ impl ApiClient {
             }
         }
         bail!(crate::loc::pick("beklenmeyen durum", "unexpected state"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn olumcul_hata_turden_taninir() {
+        let e = fatal(FatalKind::DailyLimit, "x".into());
+        assert_eq!(fatal_kind(&e), Some(FatalKind::DailyLimit));
+        // bağlam eklense de, metin ne olursa olsun tanınır
+        let e = fatal(FatalKind::Auth, "herhangi bir metin".into()).context("sarmalandı");
+        assert_eq!(fatal_kind(&e), Some(FatalKind::Auth));
+        assert!(!is_fatal(&anyhow!("API anahtarı yok")));
+        assert!(!is_fatal(&anyhow!("Network error")));
     }
 }

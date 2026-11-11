@@ -5,6 +5,13 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+- Dışa aktarma artık özgün dosyaların üzerine yazmıyor: çıktı klasörü özgün klasörle aynıysa uyarıp duruyor; aynı adlı iki bölüm birbirini ezmiyor ("Bölüm (2)").
+- Quick Clean'e görüntü olmayan dosya bırakmak önceki sonuçları silmiyor; dışa aktarılmamış temiz sayfalar varken yeni Quick Clean önce soruyor.
+- Temizlenmiş bir sayfanın maskesini düzenlemek onu dışa aktarmadan düşürmüyor; sayfa "Temiz (maske değişti)" olarak görünüyor ve eldeki temiz sonuç aktarılıyor.
+- Günlük sınır, kimlik hatası veya sunucuya ulaşılamaması artık işi tek bir açık iletiyle durduruyor (her sayfada ayrı hata vermiyor).
+- Modeller sekmesinde "Kullan"dan sonra başka sekmeden Kaydet'e basmak seçilen modeli eskisine döndürmüyor.
+- Bir iş sürerken ayarları (model, düşük VRAM) değiştirmek artık çalışan sunucuyu kesmiyor; yeniden başlatma iş bitince yapılıyor. İş veya indirme sürerken model silme engelleniyor.
+
 ## [0.5.0] - 2026-11-11
 
 - Linux desteği (deneysel): AppImage ve .deb. Ubuntu 24.04, Debian 13, Fedora 39 veya daha yeni gerekir.

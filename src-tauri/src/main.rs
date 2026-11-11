@@ -123,7 +123,9 @@ fn save_edit(eng: Eng, req: Request) -> R<()> {
     let page = eng.db.page(pid).map_err(e2s)?.ok_or_else(|| safink_core::loc::pick("sayfa yok", "page not found"))?;
     safink_core::tiles::save_edit_tiles(&eng.paths, &page, bytes).map_err(e2s)?;
     if page.status != "new" || eng.paths.mask_file(&page.sha256, page.mask_conf as f32).exists() {
-        eng.db.set_status(pid, "mask_edited", "").map_err(e2s)?;
+        // temiz sonucu olan sayfa dışa aktarımdan düşmesin: "cleaned_stale" (temizlendi, sonra maske değişti)
+        let st = if matches!(page.status.as_str(), "cleaned" | "cleaned_stale") { "cleaned_stale" } else { "mask_edited" };
+        eng.db.set_status(pid, st, "").map_err(e2s)?;
     }
     eng.tiles.invalidate(pid);
     if let Ok(Some(p)) = eng.db.page(pid) {

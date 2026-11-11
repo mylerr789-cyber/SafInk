@@ -73,6 +73,7 @@ export const STATUS: Record<string, { key: Key; tag: string }> = {
   mask_fetched: { key: 'status.mask_fetched', tag: 'tag-red' },
   mask_edited: { key: 'status.mask_edited', tag: 'tag-blue' },
   cleaned: { key: 'status.cleaned', tag: 'tag-ink' },
+  cleaned_stale: { key: 'status.cleaned_stale', tag: 'tag-blue' },
   error: { key: 'status.error', tag: 'tag-red' },
 };
 

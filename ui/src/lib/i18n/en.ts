@@ -169,11 +169,15 @@ export const en: Record<Key, string> & Record<`${string}.one`, string> = {
   'status.mask_fetched': 'Masked',
   'status.mask_edited': 'Edited',
   'status.cleaned': 'Clean',
+  'status.cleaned_stale': 'Clean (mask changed)',
   'status.error': 'Error',
   'stamp.clean': 'Clean',
   'stamp.error': 'Error',
 
   // export
+  'quick.no_images': 'No images found; the previous Quick Clean was kept.',
+  'quick.ask_replace': 'The open Quick Clean chapter has cleaned pages that were not exported. The new pages will replace them and the results will be deleted. Continue?',
+  'quick.replace_ok': 'Replace',
   'export.none': 'No cleaned pages to export. Clean the pages first.',
   'export.confirm': '{ready} cleaned pages will be exported. {skip} pages are not clean yet and will be skipped.',
   'export.confirm.one': '{ready} cleaned page will be exported. {skip} pages are not clean yet and will be skipped.',

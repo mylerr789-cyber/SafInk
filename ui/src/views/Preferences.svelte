@@ -12,6 +12,12 @@
 
   let s = $state<Settings | null>(null);
   $effect(() => { if (!s && app.settings) s = structuredClone($state.snapshot(app.settings)); });
+  // Modeller sekmesindeki "Kullan" app.settings.model_id'yi doğrudan değiştirir; yerel kopya eskimesin
+  let lastModel = app.settings?.model_id;
+  $effect(() => {
+    const m = app.settings?.model_id;
+    if (m !== undefined && m !== lastModel) { lastModel = m; if (s) s.model_id = m; }
+  });
   const dirty = $derived(!!s && !!app.settings && JSON.stringify(s) !== JSON.stringify(app.settings));
 
   const tabs = $derived<{ id: PrefsTab; label: string; no: string }[]>([

@@ -160,11 +160,15 @@ export const tr = {
   'status.mask_fetched': 'Maskeli',
   'status.mask_edited': 'Düzenlendi',
   'status.cleaned': 'Temiz',
+  'status.cleaned_stale': 'Temiz (maske değişti)',
   'status.error': 'Hata',
   'stamp.clean': 'Temiz',
   'stamp.error': 'Hata',
 
   // dışa aktarma
+  'quick.no_images': 'Görüntü bulunamadı; önceki Quick Clean korundu.',
+  'quick.ask_replace': 'Açık Quick Clean bölümünde dışa aktarılmamış temiz sayfalar var. Yeni sayfalar bunların yerini alacak ve sonuçlar silinecek. Devam edilsin mi?',
+  'quick.replace_ok': 'Değiştir',
   'export.none': 'Dışa aktarılacak temiz sayfa yok. Önce sayfaları temizleyin.',
   'export.confirm': '{ready} temiz sayfa aktarılacak. {skip} sayfa henüz temiz değil, atlanacak.',
   'export.confirm_ok': 'Aktar',

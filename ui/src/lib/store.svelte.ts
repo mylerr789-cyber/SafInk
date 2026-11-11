@@ -203,9 +203,17 @@ class AppState {
     const before = this.pages.slice(0, first).filter((x) => !ids.includes(x.id)).length;
     await this.movePages(ids, before + d);
   }
+  /** Açık Quick Clean sonuçları dışa aktarıldı mı (yeni Quick Clean eskisini silmeden önce sormak için). */
+  quickExported = false;
   async quick(paths: string[]) {
+    // geçerli girdi (görüntü uzantısı ya da klasör) yoksa hiçbir şey silinmez; arka uç da doğrular
+    const cand = paths.filter((p) => !/\.[^\\/.]+$/.test(p) || /\.(png|jpe?g|webp|bmp|gif)$/i.test(p));
+    if (!cand.length) { this.toast(t('quick.no_images'), 'err'); return; }
+    const hasResults = this.pages.some((p) => ['cleaned', 'cleaned_stale'].includes(this.statusOf(p)));
+    if (this.project?.quick && hasResults && !this.quickExported && !(await this.ask(t('quick.ask_replace'), t('quick.replace_ok')))) return;
     try {
       const cid = await api.quickNew(paths);
+      this.quickExported = false;
       await this.openChapter(cid, 'Quick Clean', 'Quick Clean', true);
     } catch (e) { this.toast(String(e), 'err'); }
   }
@@ -229,7 +237,7 @@ class AppState {
   async exportChapter(onlySelected = false) {
     if (this.exporting) return;
     const list = onlySelected && this.selected.length ? this.pages.filter((p) => this.selected.includes(p.id)) : this.pages;
-    const ready = list.filter((p) => this.statusOf(p) === 'cleaned').length;
+    const ready = list.filter((p) => ['cleaned', 'cleaned_stale'].includes(this.statusOf(p))).length;
     if (!ready) { this.toast(t('export.none'), 'err'); return; }
     const skip = list.length - ready;
     if (skip && !(await this.ask(t('export.confirm', { n: ready, ready, skip }), t('export.confirm_ok'), false))) return;
@@ -238,6 +246,7 @@ class AppState {
     this.exporting = true;
     try {
       const r = await api.exportPages(list.map((p) => p.id), dir);
+      if (this.project?.quick && !onlySelected && r.ok) this.quickExported = true;
       this.toast(t('export.done', { n: r.ok }) + (r.skipped ? t('export.skipped', { n: r.skipped }) : ''), 'ok', { label: t('export.open_folder'), run: () => api.revealPath(r.dir) });
     } catch (e) { this.toast(String(e), 'err'); }
     this.exporting = false;

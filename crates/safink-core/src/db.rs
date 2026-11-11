@@ -22,7 +22,7 @@ pub struct Page {
     pub width: i64,
     pub height: i64,
     pub sha256: String,
-    /// new | mask_fetched | mask_edited | cleaned | error
+    /// new | mask_fetched | mask_edited | cleaned | cleaned_stale (temizlendi, sonra maske değişti) | error
     pub status: String,
     pub error: String,
     pub mask_conf: f64,
