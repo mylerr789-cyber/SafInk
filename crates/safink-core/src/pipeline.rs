@@ -75,6 +75,49 @@ fn ring_flat(img: &RgbImage, ring: &[(u32, u32)], c: &FlatCfg) -> Option<[u8; 3]
     Some([med[0] as u8, med[1] as u8, med[2] as u8])
 }
 
+/// Halkadaki aykırı piksellerin (zemin renginden uzak) kaç ayrı öbek oluşturduğu (8-komşuluk, ≥3 px).
+fn ring_outlier_groups(img: &RgbImage, ring: &[(u32, u32)], col: [u8; 3], crop: (i32, i32, u32, u32), c: &FlatCfg) -> usize {
+    let (x0, y0, cw, ch) = crop;
+    let (cw, ch) = (cw as i32, ch as i32);
+    let mut grid = vec![false; (cw * ch) as usize];
+    for &(x, y) in ring {
+        let p = img.get_pixel(x, y);
+        if (0..3).any(|k| (p[k] as i32 - col[k] as i32).abs() > c.outlier_dev) {
+            grid[((y as i32 - y0) * cw + (x as i32 - x0)) as usize] = true;
+        }
+    }
+    let mut groups = 0;
+    let mut stack = Vec::new();
+    for start in 0..grid.len() {
+        if !grid[start] {
+            continue;
+        }
+        grid[start] = false;
+        stack.push(start as i32);
+        let mut size = 0;
+        while let Some(i) = stack.pop() {
+            size += 1;
+            let (x, y) = (i % cw, i / cw);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx >= 0 && ny >= 0 && nx < cw && ny < ch {
+                        let j = (ny * cw + nx) as usize;
+                        if grid[j] {
+                            grid[j] = false;
+                            stack.push(j as i32);
+                        }
+                    }
+                }
+            }
+        }
+        if size >= 3 {
+            groups += 1;
+        }
+    }
+    groups
+}
+
 /// Düz zemin doldurma (BallonsTranslator gibi): her bileşenin halkası düzse bileşen ortanca renkle (tüylü) doldurulur.
 /// `m`: genişletilmiş maske. Düz olmayan bileşenler `remaining` içinde kalır.
 pub fn flat_fill(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg) -> FlatOut {
@@ -133,6 +176,13 @@ pub fn flat_fill(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg) -> Fl
             stats.model += 1;
             continue;
         };
+        // Halkadaki aykırı pikseller ayrı ayrı yerlerde çıkıyorsa yazının altından bir şey geçiyordur
+        // (çizgi, tram şeridi, sanat): düz dolgu onu silerdi, bileşen modele gider. Balon çizgisine
+        // değen yazıda aykırılar tek bir yayda toplanır.
+        if ring_outlier_groups(img, &ring, col, (x0, y0, cw, ch), c) >= 2 {
+            stats.model += 1;
+            continue;
+        }
         stats.flat += 1;
         // tüylü dolgu (bileşen kutusu + tüy payı)
         let (fx0, fy0, fx1, fy1) = ((b.0 - fpad).max(0), (b.1 - fpad).max(0), (b.2 + fpad + 1).min(w), (b.3 + fpad + 1).min(h));
@@ -665,6 +715,25 @@ mod tests {
         // çizgi bozulmadı
         assert_eq!(*f.work.get_pixel(157, 60), Rgb([0, 0, 0]));
         assert!(f.work.get_pixel(100, 60)[0] >= 250);
+    }
+
+    #[test]
+    fn line_passing_under_text_goes_to_model() {
+        // beyaz zeminde yazının altından çapraz gri şerit geçiyor (gerçek sayfadaki kapı kenarı gibi)
+        let mut img = RgbImage::from_pixel(240, 240, Rgb([250, 250, 250]));
+        for y in 0..240i32 {
+            for x in 0..240i32 {
+                if (x + y - 240).abs() <= 3 {
+                    img.put_pixel(x as u32, y as u32, Rgb([150, 150, 150]));
+                }
+            }
+        }
+        fill_rect(&mut img, 90, 110, 150, 130, Rgb([20, 20, 20])); // yazı
+        let mut mask = GrayImage::new(240, 240);
+        rect(&mut mask, 80, 100, 160, 140);
+        let f = flat_fill(&img, &mask, 2, &FLAT_CFG);
+        assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
+        assert_eq!(f.work.as_raw(), img.as_raw(), "şerit silindi");
     }
 
     #[test]

@@ -5,6 +5,10 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+- Düz renk doldurma artık yazının altından çizgi, şerit ya da tram geçen yerleri silmiyor; bu yazılar modele gidiyor (önceden beyaz zeminde ama arkasından çizgi geçen yazılar beyazla kapatılıp çizgiyi de siliyordu).
+- Sayfalar arasında geçerken temizlenmiş sayfa doğrudan sonuçla açılıyor (her seferinde maskeden sonuca geçmek gerekmiyor).
+- Yeni kurulum ekranı görseli ve GitHub sayfası afişi.
+
 ## [0.5.1] - 2026-11-11
 
 - Yeni logo.

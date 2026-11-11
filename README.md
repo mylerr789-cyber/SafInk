@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/logo/mark-1024.png" alt="SafInk" width="160"></p>
+<p align="center"><img src="docs/logo/banner.jpg" alt="SafInk"></p>
 
 # SafInk
 
