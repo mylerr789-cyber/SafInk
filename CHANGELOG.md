@@ -5,6 +5,7 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+- Uygulama yeni sürüme artık her açılışta ve açık kaldıkça 6 saatte bir bakıyor (eskiden günde bir kezdi, aynı gün çıkan sürüm görünmüyordu).
 - Dışa aktarma artık özgün dosyaların üzerine yazmıyor: çıktı klasörü özgün klasörle aynıysa uyarıp duruyor; aynı adlı iki bölüm birbirini ezmiyor ("Bölüm (2)").
 - Quick Clean'e görüntü olmayan dosya bırakmak önceki sonuçları silmiyor; dışa aktarılmamış temiz sayfalar varken yeni Quick Clean önce soruyor.
 - Temizlenmiş bir sayfanın maskesini düzenlemek onu dışa aktarmadan düşürmüyor; sayfa "Temiz (maske değişti)" olarak görünüyor ve eldeki temiz sonuç aktarılıyor.
