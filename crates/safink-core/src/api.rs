@@ -171,10 +171,63 @@ fn uuid_v4() -> String {
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 
+/// Sunucunun sınıflandırdığı bir yazı parçası: sayfa pikselinde kutu `[x0, x1) × [y0, y1)` ve arkasının saf beyaz/siyah olma olasılığı.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlatPart {
+    pub x0: u32,
+    pub y0: u32,
+    pub x1: u32,
+    pub y1: u32,
+    pub p_flat: f32,
+}
+
 pub struct MaskResponse {
     pub png: Vec<u8>,
     pub detections: i64,
     pub seg_seconds: f64,
+    /// `None`: sunucu sınıflandırıcısı yok (ya da eski PNG yanıtı); `Some(vec![])`: parça yok.
+    pub flat: Option<Vec<FlatPart>>,
+}
+
+fn parse_flat_parts(v: &serde_json::Value) -> Option<Vec<FlatPart>> {
+    let arr = v.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for e in arr {
+        let a = e.as_array().filter(|a| a.len() >= 5)?;
+        let c = |i: usize| a[i].as_f64().filter(|x| x.is_finite() && *x >= 0.0);
+        let (x0, y0, x1, y1) = (c(0)? as u32, c(1)? as u32, c(2)? as u32, c(3)? as u32);
+        let p = a[4].as_f64().filter(|p| p.is_finite())? as f32;
+        out.push(FlatPart { x0, y0, x1, y1, p_flat: p.clamp(0.0, 1.0) });
+    }
+    Some(out)
+}
+
+/// Önbellekteki `.flat.json` içeriği (`[[x0,y0,x1,y1,p],...]`); bozuk/yok ise `None`.
+pub fn parse_flat_json(bytes: &[u8]) -> Option<Vec<FlatPart>> {
+    parse_flat_parts(&serde_json::from_slice::<serde_json::Value>(bytes).ok()?)
+}
+
+pub fn flat_to_json(parts: &[FlatPart]) -> Vec<u8> {
+    let v: Vec<serde_json::Value> = parts.iter().map(|p| serde_json::json!([p.x0, p.y0, p.x1, p.y1, p.p_flat])).collect();
+    serde_json::to_vec(&v).unwrap_or_default()
+}
+
+/// `/v1/mask` yanıtını çözer. JSON (`?flat=1`) ya da eski düz PNG olabilir; PNG'de `det`/`secs` başlıklardan gelir ve düz veri yoktur.
+pub fn parse_mask_body(content_type: &str, body: &[u8], hdr_det: i64, hdr_secs: f64) -> Result<MaskResponse> {
+    let is_json = content_type.to_ascii_lowercase().contains("json") || (!content_type.to_ascii_lowercase().contains("image/") && body.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{'));
+    if !is_json {
+        return Ok(MaskResponse { png: body.to_vec(), detections: hdr_det, seg_seconds: hdr_secs, flat: None });
+    }
+    let v: serde_json::Value = serde_json::from_slice(body).map_err(|_| anyhow!(crate::loc::pick("API yanıtı okunamadı", "Could not read the API response")))?;
+    let b64 = v["mask_png"].as_str().ok_or_else(|| anyhow!(crate::loc::pick("API yanıtında maske yok", "The API response has no mask")))?;
+    use base64::Engine as _;
+    let png = base64::engine::general_purpose::STANDARD.decode(b64.trim()).map_err(|_| anyhow!(crate::loc::pick("API maskesi çözülemedi", "Could not decode the API mask")))?;
+    Ok(MaskResponse {
+        png,
+        detections: v["detections"].as_i64().unwrap_or(hdr_det),
+        seg_seconds: v["seg_seconds"].as_f64().unwrap_or(hdr_secs),
+        flat: parse_flat_parts(&v["flat"]),
+    })
 }
 
 /// Basit token-bucket: dakikada `rate` istek, en çok `burst` birikmiş jeton.
@@ -249,7 +302,7 @@ impl ApiClient {
         if bytes.len() > MAX_UPLOAD {
             bail!(crate::t!("dosya 15 MB sınırını aşıyor ({} bayt)", "file exceeds the 15 MB limit ({} bytes)", bytes.len()));
         }
-        let url = format!("{}/v1/mask?confidence={:.2}", self.base, confidence.clamp(0.05, 0.95));
+        let url = format!("{}/v1/mask?flat=1&confidence={:.2}", self.base, confidence.clamp(0.05, 0.95));
         let max_attempts = 6;
         let mut backoff = 2.0f64;
         let mut unreachable;
@@ -278,8 +331,9 @@ impl ApiClient {
                     if st.is_success() {
                         let det = r.headers().get("x-detections").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(0);
                         let secs = r.headers().get("x-seg-seconds").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(0.0);
-                        let png = r.bytes().await?.to_vec();
-                        return Ok(MaskResponse { png, detections: det, seg_seconds: secs });
+                        let ct = r.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+                        let body = r.bytes().await?;
+                        return parse_mask_body(&ct, &body, det, secs);
                     }
                     let daily = r.headers().get("x-limit").and_then(|v| v.to_str().ok()) == Some("daily");
                     let ra = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<f64>().ok());
@@ -347,5 +401,52 @@ mod tests {
         assert_eq!(fatal_kind(&e), Some(FatalKind::Auth));
         assert!(!is_fatal(&anyhow!("API anahtarı yok")));
         assert!(!is_fatal(&anyhow!("Network error")));
+    }
+
+    fn b64(b: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    #[test]
+    fn json_with_flat_parts() {
+        let body = serde_json::json!({"mask_png": b64(b"PNGxx"), "detections": 3, "seg_seconds": 1.5, "flat_seconds": 0.2,
+            "flat": [[10, 20, 110, 60, 0.97], [5, 6, 7, 8, 0.1]]}).to_string();
+        let r = parse_mask_body("application/json", body.as_bytes(), 0, 0.0).unwrap();
+        assert_eq!(r.png, b"PNGxx");
+        assert_eq!((r.detections, r.seg_seconds), (3, 1.5));
+        let f = r.flat.unwrap();
+        assert_eq!(f.len(), 2);
+        assert_eq!(f[0], FlatPart { x0: 10, y0: 20, x1: 110, y1: 60, p_flat: 0.97 });
+        // önbellek gidiş-dönüşü
+        assert_eq!(parse_flat_json(&flat_to_json(&f)).unwrap(), f);
+    }
+
+    #[test]
+    fn json_without_flat_key_or_null_flat() {
+        let body = serde_json::json!({"mask_png": b64(b"abc"), "detections": 0, "seg_seconds": 0.5}).to_string();
+        assert!(parse_mask_body("application/json", body.as_bytes(), 0, 0.0).unwrap().flat.is_none());
+        let body = serde_json::json!({"mask_png": b64(b"abc"), "detections": 1, "seg_seconds": 0.5, "flat": null}).to_string();
+        let r = parse_mask_body("application/json; charset=utf-8", body.as_bytes(), 0, 0.0).unwrap();
+        assert!(r.flat.is_none());
+        assert_eq!(r.png, b"abc");
+        let body = serde_json::json!({"mask_png": b64(b"abc"), "flat": []}).to_string();
+        assert_eq!(parse_mask_body("application/json", body.as_bytes(), 0, 0.0).unwrap().flat, Some(vec![]));
+        assert!(parse_mask_body("application/json", b"{\"detections\":1}", 0, 0.0).is_err());
+    }
+
+    #[test]
+    fn legacy_png_response() {
+        let r = parse_mask_body("image/png", b"PNGDATA", 4, 2.5).unwrap();
+        assert_eq!(r.png, b"PNGDATA");
+        assert_eq!((r.detections, r.seg_seconds), (4, 2.5));
+        assert!(r.flat.is_none());
+    }
+
+    #[test]
+    fn bad_flat_cache_is_no_data() {
+        assert!(parse_flat_json(b"not json").is_none());
+        assert!(parse_flat_json(b"[[1,2,3]]").is_none());
+        assert!(parse_flat_json(b"null").is_none());
     }
 }

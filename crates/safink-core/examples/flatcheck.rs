@@ -1,10 +1,11 @@
 //! Düz doldurma kararını gerçek sayfalarda sayar (model çağrılmaz).
 //! cargo run --release -p safink-core --example flatcheck -- <masks dir> <out dir> <image dir>...
-//! Maske dosyaları `<sha256>_cXXX.png`; görüntüler sha256 ile eşlenir.
+//! Maske dosyaları `<sha256>_cXXX.png`; görüntüler sha256 ile eşlenir. Yanında `<sha256>_cXXX.flat.json` varsa (sunucu sınıflandırması)
+//! o kural da halka kuralının yanında ölçülür.
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use safink_core::{bubbles::BubbleDetector, maskops, pipeline};
+use safink_core::{api, maskops, pipeline};
 use sha2::{Digest, Sha256};
 
 fn main() {
@@ -15,12 +16,13 @@ fn main() {
     let mut by_sha: HashMap<String, PathBuf> = HashMap::new();
     for e in std::fs::read_dir(&masks).unwrap().flatten() {
         let n = e.file_name().to_string_lossy().to_string();
+        if !n.ends_with(".png") {
+            continue;
+        }
         if let Some((sha, _)) = n.split_once('_') {
             by_sha.insert(sha.to_string(), e.path());
         }
     }
-    // BUBBLE_ONNX verilirse balon kuralı da ölçülür (eski halka kuralıyla yan yana)
-    let mut det = std::env::var("BUBBLE_ONNX").ok().map(|p| BubbleDetector::new(std::path::Path::new(&p)).unwrap());
     let (mut tf, mut tm, mut pages, mut bf, mut bm) = (0, 0, 0, 0, 0);
     for dir in &args[2..] {
         let mut stack = vec![PathBuf::from(dir)];
@@ -47,10 +49,10 @@ fn main() {
                 let f = pipeline::flat_fill(&img, &m, 4, &pipeline::FLAT_CFG);
                 let mut line = format!("{}	ring flat={} model={}", p.display(), f.stats.flat, f.stats.model);
                 let mut work = f.work;
-                if let Some(d) = det.as_mut() {
-                    let b = d.detect(&img).unwrap();
-                    let g = pipeline::flat_fill_bubbles(&img, &m, 4, &b, &pipeline::FLAT_CFG);
-                    line += &format!("	bubble({}) flat={} model={}", b.len(), g.stats.flat, g.stats.model);
+                let fj = mp.with_extension("flat.json");
+                if let Some(parts) = std::fs::read(&fj).ok().and_then(|b| api::parse_flat_json(&b)) {
+                    let g = pipeline::flat_pass(&img, &m, 4, Some(&parts));
+                    line += &format!("	server({}) flat={} model={}", parts.len(), g.stats.flat, g.stats.model);
                     bf += g.stats.flat;
                     bm += g.stats.model;
                     work = g.work;
@@ -64,7 +66,7 @@ fn main() {
             }
         }
     }
-    println!("TOTAL pages={pages} ring: flat={tf} model={tm} | bubble: flat={bf} model={bm}");
+    println!("TOTAL pages={pages} ring: flat={tf} model={tm} | server: flat={bf} model={bm}");
 }
 
 fn hex(b: &[u8]) -> String {

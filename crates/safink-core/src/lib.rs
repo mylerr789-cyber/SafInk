@@ -1,6 +1,5 @@
 //! SafInk çekirdeği: veritabanı, API istemcisi, maske işlemleri, inpaint arka uçları, indirme yöneticisi.
 pub mod api;
-pub mod bubbles;
 pub mod catalog;
 pub mod db;
 pub mod download;

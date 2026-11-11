@@ -12,7 +12,7 @@ impl AppPaths {
         // mutlak yol: alt süreçler (sd-cli) başka çalışma dizininde başlar
         let root = std::path::absolute(&root).unwrap_or(root);
         let p = Self { root };
-        for d in [p.masks(), p.bubbles(), p.edits(), p.cleaned(), p.thumbs(), p.models(), p.tools(), p.work()] {
+        for d in [p.masks(), p.edits(), p.cleaned(), p.thumbs(), p.models(), p.tools(), p.work()] {
             std::fs::create_dir_all(d)?;
         }
         Ok(p)
@@ -20,7 +20,6 @@ impl AppPaths {
     pub fn db(&self) -> PathBuf { self.root.join("safink.db") }
     pub fn settings(&self) -> PathBuf { self.root.join("settings.json") }
     pub fn masks(&self) -> PathBuf { self.root.join("masks") }
-    pub fn bubbles(&self) -> PathBuf { self.root.join("bubbles") }
     pub fn edits(&self) -> PathBuf { self.root.join("edits") }
     pub fn cleaned(&self) -> PathBuf { self.root.join("cleaned") }
     pub fn thumbs(&self) -> PathBuf { self.root.join("thumbs") }
@@ -31,7 +30,8 @@ impl AppPaths {
     pub fn mask_file(&self, sha: &str, conf: f32) -> PathBuf {
         self.masks().join(format!("{}_c{:03}.png", sha, (conf * 100.0).round() as i32))
     }
-    pub fn bubble_file(&self, sha: &str) -> PathBuf { self.bubbles().join(format!("{sha}.bin")) }
+    /// Sunucunun sınıflandırdığı yazı parçaları (maskeyle aynı anahtar, `.flat.json`); dosya yoksa veri yok.
+    pub fn flat_file(&self, sha: &str, conf: f32) -> PathBuf { self.mask_file(sha, conf).with_extension("flat.json") }
     pub fn edit_file(&self, page_id: i64) -> PathBuf { self.edits().join(format!("{page_id}.png")) }
     pub fn cleaned_file(&self, page_id: i64) -> PathBuf { self.cleaned().join(format!("{page_id}.png")) }
     pub fn thumb_file(&self, page_id: i64) -> PathBuf { self.thumbs().join(format!("{page_id}.jpg")) }

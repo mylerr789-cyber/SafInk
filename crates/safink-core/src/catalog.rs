@@ -5,9 +5,6 @@ use std::path::PathBuf;
 
 const EMBEDDED: &str = include_str!("../catalog.json");
 
-/// Balon bölütleyici yardımcısının katalog kimliği.
-pub const BUBBLE_MODEL_ID: &str = "tool-bubble-seg";
-
 /// Python ortamı için tahmini indirme boyutu (torch CUDA + diffusers ...); yalnızca ilerleme çubuğu ağırlığı.
 pub const ENV_BYTES: u64 = 3_600_000_000;
 
@@ -100,11 +97,6 @@ impl Catalog {
         c
     }
     pub fn get(&self, id: &str) -> Option<&ModelSpec> { self.models.iter().find(|m| m.id == id) }
-    /// Balon bölütleyici ONNX dosyasının yolu (kuruluysa).
-    pub fn bubble_model(&self, paths: &AppPaths) -> Option<PathBuf> {
-        let m = self.get(BUBBLE_MODEL_ID)?;
-        m.is_installed(paths).then(|| m.file_path(paths, "model")).flatten()
-    }
 }
 
 /// "fast" takımı için en az ekran belleği (16 GB kartlar ~15,99 GB bildirir).
@@ -152,18 +144,13 @@ impl ModelSpec {
     /// Bu modelin çalışması için otomatik kurulacak çalışma ortamları (kullanıcıdan gizli).
     pub fn runtime_ids(&self) -> Vec<&'static str> {
         let hw = hardware();
-        let mut v: Vec<&'static str> = match self.backend.as_str() {
+        match self.backend.as_str() {
             // Linux'ta sd.cpp CUDA derlemesi yayımlanmıyor: NVIDIA da Vulkan kullanır
             "sdcpp" => vec![match hw.gpu_kind.as_str() { "nvidia" if cfg!(windows) => "tool-sdcpp-cuda12", "nvidia" | "other" => "tool-sdcpp-vulkan", _ => "tool-sdcpp-cpu" }],
             "sdnq" => vec!["tool-sdnq-env"],
             "lama" if hw.nvidia() => vec!["tool-sdnq-env"],
             _ => vec![],
-        };
-        // balon bölütleyici: her temizleme modeliyle birlikte kurulan küçük yardımcı (yoksa halka kuralına düşülür)
-        if self.kind != "runtime" {
-            v.push(BUBBLE_MODEL_ID);
         }
-        v
     }
     /// Kullanıcıya gösterilsin mi? (Çalışma ortamları hiç; SDNQ yalnızca NVIDIA'da.)
     pub fn visible(&self) -> bool {
@@ -185,7 +172,6 @@ impl ModelSpec {
     pub fn is_installed(&self, paths: &AppPaths) -> bool {
         match (self.backend.as_str(), self.variant.as_str()) {
             ("tool", "python") => crate::inpaint::pyworker::env_ready(paths),
-            ("tool", "bubble") => self.active_files().iter().all(|f| std::fs::metadata(self.dir(paths).join(&f.name)).map(|m| m.len() == f.size).unwrap_or(false)),
             ("tool", _) => self.tool_dir(paths).join(crate::inpaint::sdcpp::SDCLI).exists(),
             _ => {
                 let files = self.active_files();

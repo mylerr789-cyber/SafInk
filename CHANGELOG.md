@@ -8,7 +8,7 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 - Temizleme artık sayfanın tamamını değil, yalnızca yazılı yerleri işliyor (LaMa, FLUX.2 Klein, Qwen hepsinde): yazılar kümelenir, her küme çevresiyle birlikte küçültülmeden modele gider ve sonuç yalnızca maskeli piksellere yazılır. Maske dışında tek piksel bile değişmiyor; eskiden yeniden çizim modelleri sayfanın tamamını baştan çiziyordu (balon çizgileri kayabiliyor, ince çizgiler değişiyordu). 1115×1600 sayfada Qwen ~49 sn → ~28 sn, Klein ~17 → ~14 sn.
 - Yeniden çizim (Klein/Qwen) çıktısına MangaTranslator'ın son işlemi eklendi: ışıklılık/renk eşleme, yazıya yakın piksellerin yapıştırılıp uzaktaki çizimin korunması ve ton eşleme.
 
-- Düz renk doldurma artık konuşma balonunu tanıyor (küçük bir balon bölütleme modeli, temizleme modeliyle birlikte otomatik iniyor): yalnızca düz zeminli bir balonun içindeki yazı modele gitmeden doldurulur; balon dışındaki yazı (anlatı kutusu, ses efekti, sanat üstü yazı) her zaman modele gider. Balon modeli yoksa eski halka kuralı kullanılır.
+- Düz renk doldurma artık düz beyaz/siyah yazı alanlarını sunucudaki bir sınıflandırıcıyla (kendi verimizle eğitildi) belirliyor: yalnızca zemini saf beyaz ya da siyah olan yazılar modele gitmeden doldurulur; sanat, ton ya da gri zemin üstündeki yazı her zaman modele gider. Sunucu bilgisi yoksa eski halka kuralı kullanılır.
 
 ## [0.5.2] - 2026-11-11
 

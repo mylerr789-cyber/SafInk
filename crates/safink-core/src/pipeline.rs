@@ -1,6 +1,6 @@
-//! Sayfa temizleme hattı (Koharu gibi): genişlet -> (balon içi düz doldur) -> kalan maske bileşenleri karolara bölünür; her karo yerel
+//! Sayfa temizleme hattı (Koharu gibi): genişlet -> (düz zemin doldur) -> kalan maske bileşenleri karolara bölünür; her karo yerel
 //! çözünürlükte (çekirdek <= 512, + 128 px bağlam) modele gider ve yalnızca maskeli pikseller sayfaya yazılır (LaMa, Flux, Qwen aynı yol).
-use crate::bubbles::Bubble;
+use crate::api::FlatPart;
 use crate::inpaint::{Ctx, Inpainter, TileSpec};
 use crate::maskops;
 use crate::postproc;
@@ -121,9 +121,50 @@ fn ring_outlier_groups(img: &RgbImage, ring: &[(u32, u32)], col: [u8; 3], crop: 
     groups
 }
 
+/// Eski halka kuralı (sunucu verisi yokken): bileşenin 2..=6 px dışındaki halka düz renkse ortanca renk, değilse `None`.
+fn ring_decision(img: &RgbImage, labels: &[u32], l: usize, b: (i32, i32, i32, i32), pad: i32, mraw: &[u8], c: &FlatCfg) -> Option<[u8; 3]> {
+    let (w, h) = (img.width() as i32, img.height() as i32);
+        let (x0, y0, x1, y1) = ((b.0 - pad).max(0), (b.1 - pad).max(0), (b.2 + pad + 1).min(w), (b.3 + pad + 1).min(h));
+        let (cw, ch) = ((x1 - x0) as u32, (y1 - y0) as u32);
+        let mut cm = GrayImage::new(cw, ch);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if labels[(y * w + x) as usize] as usize == l {
+                    cm.put_pixel((x - x0) as u32, (y - y0) as u32, image::Luma([255]));
+                }
+            }
+        }
+        let outer = maskops::dilate(&cm, c.ring_out);
+        let inner = maskops::dilate(&cm, c.ring_in);
+        let mut ring = Vec::new();
+        for y in 0..ch {
+            for x in 0..cw {
+                if outer.get_pixel(x, y)[0] >= 128 && inner.get_pixel(x, y)[0] < 128 {
+                    let (gx, gy) = (x as i32 + x0, y as i32 + y0);
+                    if mraw[(gy * w + gx) as usize] < 128 {
+                        ring.push((gx as u32, gy as u32));
+                    }
+                }
+            }
+        }
+        let col = ring_flat(img, &ring, c)?;
+        // Halkadaki aykırı pikseller ayrı ayrı yerlerde çıkıyorsa yazının altından bir şey geçiyordur
+        // (çizgi, tram şeridi, sanat): düz dolgu onu silerdi, bileşen modele gider. Balon çizgisine
+        // değen yazıda aykırılar tek bir yayda toplanır.
+        if ring_outlier_groups(img, &ring, col, (x0, y0, cw, ch), c) >= 2 {
+            return None;
+        }
+        Some(col)
+}
+
 /// Düz zemin doldurma (BallonsTranslator gibi): her bileşenin halkası düzse bileşen ortanca renkle (tüylü) doldurulur.
 /// `m`: genişletilmiş maske. Düz olmayan bileşenler `remaining` içinde kalır.
 pub fn flat_fill(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg) -> FlatOut {
+    flat_fill_impl(img, m, feather, c, None)
+}
+
+/// `parts` verilirse (sunucu sınıflandırması) karar `server_flat_color` ile, yoksa halka kuralıyla verilir; boyama aynıdır.
+fn flat_fill_impl(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg, parts: Option<&[FlatPart]>) -> FlatOut {
     let (w, h) = (img.width() as i32, img.height() as i32);
     let (labels, spans) = label_components(m);
     let n = spans.len().saturating_sub(1);
@@ -152,40 +193,14 @@ pub fn flat_fill(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg) -> Fl
     let mraw = m.as_raw();
     for l in 1..=n {
         let b = bb[l];
-        let (x0, y0, x1, y1) = ((b.0 - pad).max(0), (b.1 - pad).max(0), (b.2 + pad + 1).min(w), (b.3 + pad + 1).min(h));
-        let (cw, ch) = ((x1 - x0) as u32, (y1 - y0) as u32);
-        let mut cm = GrayImage::new(cw, ch);
-        for y in y0..y1 {
-            for x in x0..x1 {
-                if labels[(y * w + x) as usize] as usize == l {
-                    cm.put_pixel((x - x0) as u32, (y - y0) as u32, image::Luma([255]));
-                }
-            }
-        }
-        let outer = maskops::dilate(&cm, c.ring_out);
-        let inner = maskops::dilate(&cm, c.ring_in);
-        let mut ring = Vec::new();
-        for y in 0..ch {
-            for x in 0..cw {
-                if outer.get_pixel(x, y)[0] >= 128 && inner.get_pixel(x, y)[0] < 128 {
-                    let (gx, gy) = (x as i32 + x0, y as i32 + y0);
-                    if mraw[(gy * w + gx) as usize] < 128 {
-                        ring.push((gx as u32, gy as u32));
-                    }
-                }
-            }
-        }
-        let Some(col) = ring_flat(img, &ring, c) else {
+        let col = match parts {
+            Some(p) => server_flat_color(img, m, [b.0 as u32, b.1 as u32, b.2 as u32 + 1, b.3 as u32 + 1], p),
+            None => ring_decision(img, &labels, l, b, pad, mraw, c),
+        };
+        let Some(col) = col else {
             stats.model += 1;
             continue;
         };
-        // Halkadaki aykırı pikseller ayrı ayrı yerlerde çıkıyorsa yazının altından bir şey geçiyordur
-        // (çizgi, tram şeridi, sanat): düz dolgu onu silerdi, bileşen modele gider. Balon çizgisine
-        // değen yazıda aykırılar tek bir yayda toplanır.
-        if ring_outlier_groups(img, &ring, col, (x0, y0, cw, ch), c) >= 2 {
-            stats.model += 1;
-            continue;
-        }
         stats.flat += 1;
         // tüylü dolgu (bileşen kutusu + tüy payı)
         let (fx0, fy0, fx1, fy1) = ((b.0 - fpad).max(0), (b.1 - fpad).max(0), (b.2 + fpad + 1).min(w), (b.3 + fpad + 1).min(h));
@@ -229,12 +244,20 @@ pub fn flat_fill(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg) -> Fl
     FlatOut { work, remaining, stats }
 }
 
-/// Koharu/BallonsTranslator kuralı: balonun maske dışı, kenardan ≥ `BUBBLE_EDGE_MARGIN` px içerideki pikselleri (≥ `BUBBLE_MIN_PIXELS`) düzse
-/// (kanal başına ortancadan standart sapma < 10; kanal sapmaları birbirinden >1 ayrışıyorsa < 7) balon içindeki maske pikselleri
-/// ortanca renkle doldurulur. Balon dışında kalan yazı ve düz olmayan balonlar modele gider.
-pub const BUBBLE_EDGE_MARGIN: u32 = 3;
-pub const BUBBLE_MIN_PIXELS: usize = 16;
-const EDGE_PAD: u32 = 4;
+/// Sunucu sınıflandırmalı düz doldurma kuralı (bileşen = genişletilmiş maskenin 8-bağlantılı bir bileşeni):
+///  (a) sınır kutusu bileşenin kutusuyla kesişen (pozitif alanlı) en az bir sunucu parçası olmalı ve hepsinin `p_flat >= FLAT_P_MIN` olmalı;
+///  (b) piksel güvenlik denetimi: "yazı dışı" pikseller = bileşen kutusunun `SAFE_PAD` px genişletilmişi içinde, genişletilmiş maskenin
+///      (tüm bileşenler, `m`) `SAFE_HALO` px dışında kalanlar. Bunların (>= `SAFE_MIN_PIXELS`) kanal ortancası hepsinde >= `SAFE_WHITE` (beyaz) ya da
+///      hepsinde <= `SAFE_BLACK` (siyah) olmalı ve herhangi bir kanalda ortancadan `SAFE_DEV` fazla sapanlar `SAFE_DEV_FRAC` oranının altında kalmalı.
+/// Geçerse dolgu rengi saf beyaz (255) ya da saf siyah (0); geçmezse `None` (bileşen modele gider).
+pub const FLAT_P_MIN: f32 = 0.90;
+pub const SAFE_PAD: u32 = 8;
+pub const SAFE_HALO: u32 = 2;
+pub const SAFE_WHITE: u8 = 245;
+pub const SAFE_BLACK: u8 = 10;
+pub const SAFE_DEV: i32 = 30;
+pub const SAFE_DEV_FRAC: f64 = 0.005;
+pub const SAFE_MIN_PIXELS: usize = 16;
 
 fn median_u8(v: &mut [u8]) -> u8 {
     v.sort_unstable();
@@ -242,129 +265,60 @@ fn median_u8(v: &mut [u8]) -> u8 {
     if v.len() % 2 == 0 { ((v[mid - 1] as u16 + v[mid] as u16) / 2) as u8 } else { v[mid] }
 }
 
-/// Balonun düz zemin rengi (maske dışı iç pikseller); düz değilse `None`.
-fn bubble_uniform_color(img: &RgbImage, pending: &GrayImage, b: &Bubble) -> Option<[u8; 3]> {
-    let [bx0, by0, _, _] = b.bounds;
-    let (bw, bh) = (b.w(), b.h());
-    let m = EDGE_PAD;
-    // kenara uzaklık: balonun dışı 255, içi 0 -> disk genişletme -> 0 kalanlar kenardan >= margin içeride
-    let mut outside = GrayImage::from_pixel(bw + 2 * m, bh + 2 * m, image::Luma([255]));
-    for y in 0..bh {
-        for x in 0..bw {
-            if b.mask[(y * bw + x) as usize] != 0 {
-                outside.put_pixel(x + m, y + m, image::Luma([0]));
-            }
-        }
-    }
-    let near = maskops::dilate(&outside, BUBBLE_EDGE_MARGIN);
-    let (iw, ih) = img.dimensions();
-    let mut ch = [Vec::new(), Vec::new(), Vec::new()];
-    for y in 0..bh {
-        for x in 0..bw {
-            if near.get_pixel(x + m, y + m)[0] >= 128 {
-                continue;
-            }
-            let (gx, gy) = (bx0 + x, by0 + y);
-            // sayfa kenarına değen balon: sayfanın dışı da "kenar" sayılır
-            if gx < BUBBLE_EDGE_MARGIN || gy < BUBBLE_EDGE_MARGIN || gx + BUBBLE_EDGE_MARGIN >= iw || gy + BUBBLE_EDGE_MARGIN >= ih {
-                continue;
-            }
-            if pending.get_pixel(gx, gy)[0] >= 128 {
-                continue;
-            }
-            let p = img.get_pixel(gx, gy);
-            for k in 0..3 {
-                ch[k].push(p[k]);
-            }
-        }
-    }
-    if ch[0].len() < BUBBLE_MIN_PIXELS {
+/// `bbox`: `[x0, y0, x1, y1)` (x1/y1 dışta).
+pub fn server_flat_color(img: &RgbImage, m: &GrayImage, bbox: [u32; 4], parts: &[FlatPart]) -> Option<[u8; 3]> {
+    let hit: Vec<&FlatPart> = parts.iter().filter(|p| p.x0 < bbox[2] && bbox[0] < p.x1 && p.y0 < bbox[3] && bbox[1] < p.y1).collect();
+    if hit.is_empty() || hit.iter().any(|p| p.p_flat < FLAT_P_MIN) {
         return None;
     }
-    let med = [median_u8(&mut ch[0]), median_u8(&mut ch[1]), median_u8(&mut ch[2])];
-    let dev: Vec<f64> = (0..3).map(|k| (ch[k].iter().map(|&v| (v as f64 - med[k] as f64).powi(2)).sum::<f64>() / ch[k].len() as f64).sqrt()).collect();
-    let mean = dev.iter().sum::<f64>() / 3.0;
-    let spread = (dev.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / 3.0).sqrt();
-    let thr = if spread > 1.0 { 7.0 } else { 10.0 };
-    (dev.iter().cloned().fold(0.0, f64::max) < thr).then_some(med)
-}
-
-/// Balon tabanlı düz doldurma. `m`: genişletilmiş maske. Yalnızca düz bir balonun içindeki maske pikselleri doldurulur (tüylü kenar balon içinde kalır).
-pub fn flat_fill_bubbles(img: &RgbImage, m: &GrayImage, feather: u32, bubbles: &[Bubble], c: &FlatCfg) -> FlatOut {
     let (w, h) = img.dimensions();
-    let mut work = img.clone();
-    let mut pending = m.clone();
-    for b in bubbles {
-        let [bx0, by0, bx1, by1] = b.bounds;
-        let (bx1, by1) = (bx1.min(w), by1.min(h));
-        let mut targets: Vec<(u32, u32)> = Vec::new();
-        for y in by0..by1 {
-            for x in bx0..bx1 {
-                if pending.get_pixel(x, y)[0] >= 128 && b.contains(x, y) {
-                    targets.push((x, y));
-                }
-            }
-        }
-        if targets.is_empty() {
-            continue;
-        }
-        let Some(col) = bubble_uniform_color(img, &pending, b) else { continue };
-        let fpad = (feather as f32 * 1.2).ceil() as i32 * 3 + 2;
-        let (fx0, fy0) = ((bx0 as i32 - fpad).max(0), (by0 as i32 - fpad).max(0));
-        let (fx1, fy1) = ((bx1 as i32 + fpad).min(w as i32), (by1 as i32 + fpad).min(h as i32));
-        let (fw, fh) = ((fx1 - fx0) as u32, (fy1 - fy0) as u32);
-        let mut tm = GrayImage::new(fw, fh);
-        for &(x, y) in &targets {
-            tm.put_pixel(x - fx0 as u32, y - fy0 as u32, image::Luma([255]));
-        }
-        let alpha = maskops::feather_alpha(&tm, feather as f32);
-        for y in 0..fh {
-            for x in 0..fw {
-                let a = alpha[(y * fw + x) as usize];
-                if a <= 0.004 {
-                    continue;
-                }
-                let (gx, gy) = (x + fx0 as u32, y + fy0 as u32);
-                let is_target = tm.get_pixel(x, y)[0] >= 128;
-                if !is_target {
-                    // tüy payı: yalnızca balonun içinde, maskesiz ve zemine benzeyen pikseller (balon çizgisi/sanat bozulmaz)
-                    if !b.contains(gx, gy) || pending.get_pixel(gx, gy)[0] >= 128 {
-                        continue;
-                    }
-                    let o = work.get_pixel(gx, gy);
-                    if (0..3).any(|k| (o[k] as i32 - col[k] as i32).abs() > c.outlier_dev) {
-                        continue;
-                    }
-                }
-                let o = *work.get_pixel(gx, gy);
-                let mut px = o;
-                for k in 0..3 {
-                    px[k] = (o[k] as f32 * (1.0 - a) + col[k] as f32 * a).round().clamp(0.0, 255.0) as u8;
-                }
-                work.put_pixel(gx, gy, px);
-            }
-        }
-        for &(x, y) in &targets {
-            pending.put_pixel(x, y, image::Luma([0]));
+    let crop_pad = SAFE_PAD + SAFE_HALO + 2;
+    let (cx0, cy0) = (bbox[0].saturating_sub(crop_pad), bbox[1].saturating_sub(crop_pad));
+    let (cx1, cy1) = ((bbox[2] + crop_pad).min(w), (bbox[3] + crop_pad).min(h));
+    let (cw, ch) = (cx1 - cx0, cy1 - cy0);
+    let mut cm = GrayImage::new(cw, ch);
+    for y in 0..ch {
+        for x in 0..cw {
+            cm.put_pixel(x, y, *m.get_pixel(x + cx0, y + cy0));
         }
     }
-    // istatistik: özgün maskenin bileşenleri; hiç kalan pikseli olmayan düz sayılır
-    let (labels, spans) = label_components(m);
-    let n = spans.len().saturating_sub(1);
-    let mut left = vec![false; n + 1];
-    for (i, &l) in labels.iter().enumerate() {
-        if l != 0 && pending.as_raw()[i] >= 128 {
-            left[l as usize] = true;
+    let near = maskops::dilate(&cm, SAFE_HALO);
+    let (rx0, ry0) = (bbox[0].saturating_sub(SAFE_PAD), bbox[1].saturating_sub(SAFE_PAD));
+    let (rx1, ry1) = ((bbox[2] + SAFE_PAD).min(w), (bbox[3] + SAFE_PAD).min(h));
+    let mut px: Vec<[u8; 3]> = Vec::new();
+    for y in ry0..ry1 {
+        for x in rx0..rx1 {
+            if near.get_pixel(x - cx0, y - cy0)[0] < 128 {
+                px.push(img.get_pixel(x, y).0);
+            }
         }
     }
-    let model = left.iter().filter(|&&v| v).count();
-    FlatOut { work, remaining: pending, stats: FlatStats { flat: n - model, model } }
+    if px.len() < SAFE_MIN_PIXELS {
+        return None;
+    }
+    let mut med = [0u8; 3];
+    for k in 0..3 {
+        let mut v: Vec<u8> = px.iter().map(|p| p[k]).collect();
+        med[k] = median_u8(&mut v);
+    }
+    let col = if med.iter().all(|&v| v >= SAFE_WHITE) {
+        255u8
+    } else if med.iter().all(|&v| v <= SAFE_BLACK) {
+        0u8
+    } else {
+        return None;
+    };
+    let dev = px.iter().filter(|p| (0..3).any(|k| (p[k] as i32 - med[k] as i32).abs() > SAFE_DEV)).count();
+    if dev as f64 >= SAFE_DEV_FRAC * px.len() as f64 {
+        return None;
+    }
+    Some([col; 3])
 }
 
-/// Düz doldurma geçişi: balonlar biliniyorsa Koharu kuralı, bilinmiyorsa (model yok/başarısız) halka kuralı.
-pub fn flat_pass(img: &RgbImage, m: &GrayImage, feather: u32, bubbles: Option<&[Bubble]>) -> FlatOut {
-    match bubbles {
-        Some(b) => flat_fill_bubbles(img, m, feather, b, &FLAT_CFG),
+/// Düz doldurma geçişi: sunucu sınıflandırması (`Some`) varsa yukarıdaki kural, yoksa (eski önbellek, sunucu sınıflandırıcısı kapalı) halka kuralı.
+pub fn flat_pass(img: &RgbImage, m: &GrayImage, feather: u32, parts: Option<&[FlatPart]>) -> FlatOut {
+    match parts {
+        Some(p) => flat_fill_impl(img, m, feather, &FLAT_CFG, Some(p)),
         None => flat_fill(img, m, feather, &FLAT_CFG),
     }
 }
@@ -374,7 +328,7 @@ pub fn clean_image(
     img: &RgbImage,
     mask: &GrayImage,
     p: &CleanParams,
-    bubbles: Option<&[Bubble]>,
+    parts: Option<&[FlatPart]>,
     inp: &mut dyn Inpainter,
     cancel: &AtomicBool,
     progress: &dyn Fn(usize, usize),
@@ -385,7 +339,7 @@ pub fn clean_image(
     }
     let m = maskops::dilate(mask, p.dilation);
     if p.flat_fill {
-        let f = flat_pass(img, &m, p.feather, bubbles);
+        let f = flat_pass(img, &m, p.feather, parts);
         if f.stats.model == 0 {
             return Ok(f.work);
         }
@@ -827,62 +781,89 @@ mod tests {
         assert_eq!(f.work.as_raw(), img.as_raw(), "şerit silindi");
     }
 
-    fn ellipse_bubble(cx: f32, cy: f32, rx: f32, ry: f32) -> Bubble {
-        let b = [(cx - rx) as u32 - 1, (cy - ry) as u32 - 1, (cx + rx) as u32 + 2, (cy + ry) as u32 + 2];
-        Bubble::from_fn(b, |x, y| ((x as f32 - cx) / rx).powi(2) + ((y as f32 - cy) / ry).powi(2) <= 1.0)
+    fn part(x0: u32, y0: u32, x1: u32, y1: u32, p: f32) -> FlatPart {
+        FlatPart { x0, y0, x1, y1, p_flat: p }
+    }
+
+    fn page(bg: u8) -> (RgbImage, GrayImage) {
+        let mut img = RgbImage::from_pixel(240, 160, Rgb([bg, bg, bg]));
+        let fg = if bg > 128 { 0 } else { 255 };
+        fill_rect(&mut img, 80, 70, 160, 84, Rgb([fg, fg, fg]));
+        let mut mask = GrayImage::new(240, 160);
+        rect(&mut mask, 78, 68, 162, 86);
+        (img, mask)
     }
 
     #[test]
-    fn koharu_rule_fills_uniform_bubble_only_inside() {
-        let mut img = RgbImage::from_pixel(300, 200, Rgb([200, 200, 200]));
-        let bub = ellipse_bubble(100.0, 100.0, 70.0, 60.0);
-        for y in 0..200 {
-            for x in 0..300 {
-                if bub.contains(x, y) {
-                    img.put_pixel(x, y, Rgb([255, 255, 255]));
-                }
-            }
-        }
-        fill_rect(&mut img, 70, 95, 130, 105, Rgb([0, 0, 0])); // balon içi yazı
-        fill_rect(&mut img, 220, 90, 270, 100, Rgb([0, 0, 0])); // balon dışı yazı
-        let mut mask = GrayImage::new(300, 200);
-        rect(&mut mask, 68, 93, 132, 107);
-        rect(&mut mask, 218, 88, 272, 102);
-        let f = flat_fill_bubbles(&img, &mask, 2, &[bub], &FLAT_CFG);
-        assert_eq!(f.stats, FlatStats { flat: 1, model: 1 });
-        assert!(f.work.get_pixel(100, 100)[0] >= 250, "balon içi yazı silinmedi");
-        assert_eq!(*f.work.get_pixel(245, 95), Rgb([0, 0, 0]), "balon dışı yazıya dokunulmamalı");
-        assert_eq!(f.remaining.get_pixel(100, 100)[0], 0);
-        assert_eq!(f.remaining.get_pixel(245, 95)[0], 255);
-        // maske dışı hiçbir yer değişmedi (tüy payı dışında balon içi zemin zaten aynı renk)
-        for (x, y, p) in f.work.enumerate_pixels() {
-            if mask.get_pixel(x, y)[0] < 128 && !(60..140).contains(&x) {
-                assert_eq!(p, img.get_pixel(x, y));
-            }
-        }
-    }
-
-    #[test]
-    fn koharu_rule_bubble_with_stripe_goes_to_model() {
-        let mut img = RgbImage::from_pixel(300, 200, Rgb([255, 255, 255]));
-        let bub = ellipse_bubble(150.0, 100.0, 100.0, 70.0);
-        fill_rect(&mut img, 60, 60, 240, 66, Rgb([120, 120, 120])); // maskesiz şerit (tram/çizgi)
-        fill_rect(&mut img, 110, 98, 190, 108, Rgb([0, 0, 0]));
-        let mut mask = GrayImage::new(300, 200);
-        rect(&mut mask, 108, 96, 192, 110);
-        let f = flat_fill_bubbles(&img, &mask, 2, &[bub], &FLAT_CFG);
+    fn server_rule_low_p_goes_to_model() {
+        let (img, mask) = page(255);
+        let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.89)]));
         assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
         assert_eq!(f.work.as_raw(), img.as_raw());
         assert_eq!(f.remaining.as_raw(), mask.as_raw());
     }
 
     #[test]
-    fn no_bubbles_known_falls_back_to_ring_rule() {
+    fn server_rule_p_ok_but_grey_background_goes_to_model() {
+        let (img, mask) = page(200);
+        let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.99)]));
+        assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
+        assert_eq!(f.work.as_raw(), img.as_raw());
+    }
+
+    #[test]
+    fn server_rule_p_ok_white_fills_pure_white() {
+        let (img, mask) = page(252); // hafif kirli beyaz: dolgu saf 255
+        let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.97)]));
+        assert_eq!(f.stats, FlatStats { flat: 1, model: 0 });
+        assert_eq!(*f.work.get_pixel(120, 77), Rgb([255, 255, 255]));
+        assert_eq!(f.remaining.get_pixel(120, 77)[0], 0);
+    }
+
+    #[test]
+    fn server_rule_p_ok_black_fills_pure_black() {
+        let (img, mask) = page(3);
+        let f = flat_pass(&img, &mask, 2, Some(&[part(70, 60, 170, 95, 0.95)]));
+        assert_eq!(f.stats, FlatStats { flat: 1, model: 0 });
+        assert_eq!(*f.work.get_pixel(120, 77), Rgb([0, 0, 0]));
+    }
+
+    #[test]
+    fn server_rule_needs_a_part_and_all_parts_ok() {
+        let (img, mask) = page(255);
+        // kesişen parça yok
+        assert_eq!(flat_pass(&img, &mask, 2, Some(&[part(0, 0, 20, 20, 0.99)])).stats.model, 1);
+        assert_eq!(flat_pass(&img, &mask, 2, Some(&[])).stats.model, 1);
+        // kesişenlerden biri düşük
+        assert_eq!(flat_pass(&img, &mask, 2, Some(&[part(70, 60, 120, 95, 0.99), part(120, 60, 170, 95, 0.5)])).stats.model, 1);
+        assert_eq!(flat_pass(&img, &mask, 2, Some(&[part(70, 60, 120, 95, 0.99), part(120, 60, 170, 95, 0.95)])).stats.flat, 1);
+    }
+
+    #[test]
+    fn server_rule_pixel_check_catches_stripe_under_text() {
+        let (mut img, mask) = page(255);
+        fill_rect(&mut img, 40, 77, 200, 80, Rgb([120, 120, 120])); // yazının iki yanından geçen maskesiz şerit
+        let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.99)]));
+        assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
+    }
+
+    #[test]
+    fn no_server_data_falls_back_to_ring_rule() {
         let mut img = RgbImage::from_pixel(200, 200, Rgb([255, 255, 255]));
         fill_rect(&mut img, 50, 90, 150, 100, Rgb([0, 0, 0]));
         let mut mask = GrayImage::new(200, 200);
         rect(&mut mask, 48, 88, 152, 102);
         assert_eq!(flat_pass(&img, &mask, 2, None).stats.flat, 1);
-        assert_eq!(flat_pass(&img, &mask, 2, Some(&[])).stats, FlatStats { flat: 0, model: 1 }); // balon yok: balon dışı yazı modele
+        // aynı sayfa, sunucu "parça yok" derse (veri var) model
+        assert_eq!(flat_pass(&img, &mask, 2, Some(&[])).stats, FlatStats { flat: 0, model: 1 });
+    }
+
+    #[test]
+    fn ring_fallback_keeps_outlier_guard() {
+        // halka kuralı: yazının altından geçen şerit hâlâ modele gider (sunucu verisi yok)
+        let (mut img, mask) = page(250);
+        fill_rect(&mut img, 40, 74, 76, 77, Rgb([120, 120, 120]));
+        fill_rect(&mut img, 164, 74, 200, 77, Rgb([120, 120, 120]));
+        assert_eq!(flat_pass(&img, &mask, 2, None).stats, FlatStats { flat: 0, model: 1 });
     }
 }

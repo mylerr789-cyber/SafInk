@@ -92,18 +92,6 @@ add(id="tool-sdnq-env", name="Python ortamı", backend="tool", kind="runtime", v
     description="uv ile yönetilen Python 3.12 + torch (CUDA) + diffusers + sdnq + spandrel.", description_en="Python 3.12 managed by uv + torch (CUDA) + diffusers + sdnq + spandrel.", license="BSD/Apache", license_url="https://github.com/Disty0/sdnq",
     files=[])
 
-# Balon bölütleyici (kullanıcıdan gizli yardımcı; her temizleme modeliyle kurulur). huyvux3005/manga109-segmentation-bubble (YOLO11n-seg) .pt -> ONNX
-# (ultralytics, opset 17, imgsz 1024, simplify) dışa aktarılıp GitHub release'ine yüklenir. Kart lisansı CC-BY-NC-4.0 (rozeti Apache-2.0 diyor, çelişkili).
-# Boyut/sha256 yerel dosyadan: BUBBLE_ONNX ortam değişkeni ya da target/bubble/bubble-seg.onnx.
-import hashlib, os
-_bp = os.environ.get("BUBBLE_ONNX", "target/bubble/bubble-seg.onnx")
-_bb = open(_bp, "rb").read()
-add(id="tool-bubble-seg", name="Balon bölütleyici (YOLO11n-seg)", backend="tool", kind="runtime", variant="bubble",
-    description="Konuşma balonlarını bulur; balon içindeki yazı düz zeminde modele gitmeden doldurulur.", description_en="Finds speech balloons; text inside a plain balloon is filled flat without running the model.",
-    license="CC-BY-NC-4.0", license_url="https://huggingface.co/huyvux3005/manga109-segmentation-bubble",
-    files=[{"name": "bubble-seg.onnx", "role": "model", "url": "https://github.com/mylerr789-cyber/SafInk/releases/download/models-v1/bubble-seg.onnx",
-            "sha256": hashlib.sha256(_bb).hexdigest(), "size": len(_bb), "only": "", "os": ""}])
-
 # ---- Yeniden çizim (MangaTranslator'ın Klein 4B ayarları: 4 adım, guidance 1.0, euler) ----
 add(id="sdcpp-flux2-klein-4b", name="FLUX.2 Klein 4B", backend="sdcpp", kind="redraw", mode="edit", recommended=True,
     description="Desenli ve karmaşık arka planı yeniden çizerek yazıyı siler. Her ekran kartında çalışır.", description_en="Erases the text by redrawing patterned and complex backgrounds. Works on any graphics card.",
