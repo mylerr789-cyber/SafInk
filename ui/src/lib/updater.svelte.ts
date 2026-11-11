@@ -3,8 +3,8 @@ import { inTauri } from './host';
 import { app } from './store.svelte';
 import { t } from './i18n/index.svelte';
 
-const LAST_KEY = 'safink.updateCheck';
-const DAY = 24 * 3600 * 1000;
+// Açılışta her zaman, açık kaldıkça 6 saatte bir bakılır (eskiden günde bir kezdi; aynı gün çıkan sürüm görünmüyordu).
+const EVERY = 6 * 3600 * 1000;
 
 class Updater {
   version = $state<string | null>(null); // bulunan yeni sürüm
@@ -15,16 +15,19 @@ class Updater {
   total = $state(0);
   private upd: any = null;
 
-  /** auto: açılıştaki sessiz denetim (günde en çok bir kez). */
+  /** Açılışta bir kez çağrılır; sonra 6 saatte bir sessizce yeniden bakar. */
+  start() {
+    if (!inTauri) return;
+    this.check(true);
+    setInterval(() => { if (!this.open) this.check(true); }, EVERY);
+  }
+
+  /** auto: sessiz denetim (hata ve "güncelsiniz" bildirimi gösterilmez). */
   async check(auto: boolean) {
     if (!inTauri || this.busy) return;
-    if (auto) {
-      try { if (Date.now() - Number(localStorage.getItem(LAST_KEY) ?? 0) < DAY) return; } catch {}
-    }
     try {
       const { check } = await import('@tauri-apps/plugin-updater');
       const u = await check();
-      try { localStorage.setItem(LAST_KEY, String(Date.now())); } catch {}
       if (u) { this.upd = u; this.version = u.version; this.notes = u.body ?? ''; this.open = true; }
       else if (!auto) app.toast(t('update.latest'), 'ok');
     } catch (e) {

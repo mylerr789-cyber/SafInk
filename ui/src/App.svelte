@@ -16,7 +16,7 @@
 
   onMount(() => {
     app.init();
-    const ut = setTimeout(() => updater.check(true), 6000);
+    const ut = setTimeout(() => updater.start(), 6000);
     let un: (() => void) | undefined;
     onDragDrop((p) => {
       if (p.type === 'enter' || p.type === 'over') app.dragging = true;
