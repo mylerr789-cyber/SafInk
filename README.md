@@ -2,6 +2,8 @@
 
 # SafInk
 
+[English](README.en.md) · **Türkçe**
+
 Manga ve webtoon sayfalarındaki yazıları temizleyen Windows uygulaması.
 Sayfaları bırakın, yazılar bulunsun, tek tıkla temizlensin. Kaçan ya da yanlış işaretlenen yerleri fırçayla düzeltebilirsiniz.
 
@@ -9,6 +11,7 @@ Sayfaları bırakın, yazılar bulunsun, tek tıkla temizlensin. Kaçan ya da ya
 
 [Releases](../../releases) sayfasından `SafInk_x.y.z_x64-setup.exe` dosyasını indirip kurun.
 Windows "bilinmeyen yayıncı" uyarısı verirse **Ek bilgi ▸ Yine de çalıştır**.
+Yeni sürüm çıkınca uygulama kendini günceller.
 
 ## Kullanım
 
@@ -19,6 +22,7 @@ Hangi modeli seçeceğinizi bilmiyorsanız: [Model rehberi](docs/MODELLER.md).
 3. **Sayfayı temizle** ya da **Bölümün tamamı**.
 4. **Dışa aktar** ile temiz sayfaları kaydedin.
 
+Arayüz Türkçe ve İngilizcedir (Tercihler ▸ Dil).
 Ücretsizdir; günlük bir kullanım sınırı vardır.
 
 ## Kaynaktan derleme
@@ -40,8 +44,3 @@ SafInk MIT lisanslıdır. Modeller uygulamayla gelmez, kendi kaynaklarından ind
 [Qwen-Image 2.1 Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) (Qwen Research Lisansı, ticari kullanım yok) ve Qwen3-VL-8B (Apache-2.0),
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (MIT),
 [SDNQ](https://github.com/Disty0/sdnq).
-
----
-
-**English:** SafInk removes text from manga and webtoon pages on Windows. Download the installer from [Releases](../../releases),
-pick a model in Preferences ▸ Models, drop your pages in and click clean. Free, with a daily limit. MIT licensed.

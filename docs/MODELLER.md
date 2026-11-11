@@ -1,5 +1,7 @@
 # Hangi modeli seçmeliyim?
 
+[English](MODELS.md) · **Türkçe**
+
 Kısa cevap: **LaMa Manga ile başlayın.** Desenli ya da çizimli zeminde kalan yazılar için **Qwen** kullanın.
 
 Hangi modeli seçerseniz seçin, düz renkli balonlar (beyaz, siyah, gri) modele hiç gitmez. SafInk bunları kendisi anında doldurur. Model yalnızca desenli ve çizimli yerlerde çalışır.
@@ -35,13 +37,3 @@ Bunlar aynı modellerin SDNQ sürümleridir ve yalnızca NVIDIA kartlarda görü
 - **Qwen-Image 2.1 Turbo:** Qwen Research lisansı. **Ticari kullanıma izin vermez.**
 
 Modeller uygulamayla gelmez, kendi kaynaklarından indirilir.
-
----
-
-## Which model? (English)
-
-Start with **LaMa Manga**. Use **Qwen** for text that sits on top of artwork. Plain balloons are always filled instantly without any model.
-
-- **LaMa Manga:** fast and sharp, never invents shapes; may leave grey smudges under big SFX on art.
-- **Qwen-Image 2.1 Turbo:** most faithful on artwork, about 20–25 s/page on a 16 GB NVIDIA card; non-commercial licence.
-- **FLUX.2 Klein 4B:** works on AMD/Intel via Vulkan; can invent shapes in large areas.
