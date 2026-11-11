@@ -3338,7 +3338,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "safink"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "percent-encoding",
@@ -3357,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "safink-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
