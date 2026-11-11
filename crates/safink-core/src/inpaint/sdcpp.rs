@@ -95,6 +95,13 @@ impl SdCppInpainter {
             p("--sigmas", sig.to_string()); // sabit adım çizelgesi (Qwen-Image 2.1 Turbo: "qwen-image-2.1-turbo")
         }
         p("--sampling-method", self.ps("sampler", "euler"));
+        // adım önbelleği (örn. "dbcache": 8 adımda ~%20 hız, görüntü farkı ihmal edilebilir); eşik isteğe bağlı
+        if let Some(mode) = self.spec.params.get("cache_mode").and_then(|v| v.as_str()) {
+            p("--cache-mode", mode.to_string());
+            if let Some(th) = self.spec.params.get("cache_threshold").and_then(|v| v.as_f64()) {
+                p("--cache-option", format!("threshold={th}"));
+            }
+        }
         // 24 GB+ ekran kartında ağırlıklar VRAM'de kalır (daha hızlı); altında RAM'e boşaltılır
         if self.spec.params.get("offload").and_then(|v| v.as_bool()).unwrap_or(true) && crate::catalog::hardware().vram_gb < 23.5 {
             a.push("--offload-to-cpu".into());

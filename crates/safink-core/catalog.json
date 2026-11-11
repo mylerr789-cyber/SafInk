@@ -390,7 +390,7 @@
    "license_url": "https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
    "min_vram_gb": 12,
    "min_ram_gb": 24,
-   "notes": "Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~50 sn, en çok ~14 GB VRAM.",
+   "notes": "Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. 16 GB+ NVIDIA'da INT8 takımı (RTX 4060 Ti 16 GB: sayfa başına ~25 sn), altında Q4_K_M takımı (~45 sn); en çok ~15 GB VRAM.",
    "params": {
     "steps": 8,
     "cfg": 1.0,
@@ -406,6 +406,10 @@
     "prompt_lama_prefill": "Clean manga artwork. Keep everything as is; fix smudges and continue lines and screentone naturally. No text.",
     "quant": "GGUF Q4_K_M"
    },
+   "fast_params": {
+    "quant": "INT8 convrot",
+    "cache_mode": "dbcache"
+   },
    "files": [
     {
      "name": "qwen-image-2.1-turbo-Q4_K_M.gguf",
@@ -413,7 +417,15 @@
      "url": "https://huggingface.co/unsloth/Qwen-Image-2.1-Turbo-GGUF/resolve/main/qwen-image-2.1-turbo-Q4_K_M.gguf",
      "sha256": "8940e8b522af886e0c0f5afddf720e82dd223cb9a43580b5f61c4d740452ac20",
      "size": 4199565120,
-     "only": ""
+     "only": "compact"
+    },
+    {
+     "name": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+     "role": "diffusion",
+     "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors",
+     "sha256": "8144a0182964aa8403ad6dbc011db837304167d235161b9aabaa8532e967314c",
+     "size": 7256787829,
+     "only": "fast"
     },
     {
      "name": "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf",

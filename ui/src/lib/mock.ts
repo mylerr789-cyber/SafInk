@@ -99,7 +99,7 @@ const installedSet = new Set<string>(['lama-manga']);
 const partial = new Map<string, number>();
 const RUNTIME_BYTES: Record<string, number> = { nvidia: 930377011, other: 29947836, none: 18172997 };
 const ENV_BYTES = 3_600_000_000;
-const active = (m: any) => (m.files ?? []).filter((f: any) => !f.only || (f.only === 'cuda') === (HW === 'nvidia'));
+const active = (m: any) => (m.files ?? []).filter((f: any) => !f.only || (f.only === 'fast' ? hardware.vram_gb >= 15 : f.only === 'compact' ? hardware.vram_gb < 15 : (f.only === 'cuda') === (HW === 'nvidia')));
 const models = () => (catalog as any).models.map((m: any) => {
   const total = active(m).reduce((n: number, f: any) => n + (f.size || 0), 0);
   const installed = installedSet.has(m.id);

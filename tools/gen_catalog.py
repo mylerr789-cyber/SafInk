@@ -111,9 +111,13 @@ QWEN = {"steps": 8, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": 
 add(id="sdcpp-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo", backend="sdcpp", kind="redraw", mode="edit",
     description="Qwen-Image 2.1 Turbo ile yazı yerini çevresine uygun yeniden çizer; Klein'dan ağır ve yavaş.", description_en="Redraws the text area to match its surroundings with Qwen-Image 2.1 Turbo; heavier and slower than Klein.",
     license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
-    min_vram_gb=12, min_ram_gb=24, notes="Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~50 sn, en çok ~14 GB VRAM.",
+    min_vram_gb=12, min_ram_gb=24, notes="Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. 16 GB+ NVIDIA'da INT8 takımı (RTX 4060 Ti 16 GB: sayfa başına ~25 sn), altında Q4_K_M takımı (~45 sn); en çok ~15 GB VRAM.",
     params={**QWEN, "quant": "GGUF Q4_K_M"},
-    files=[hf_file("unsloth/Qwen-Image-2.1-Turbo-GGUF", "qwen-image-2.1-turbo-Q4_K_M.gguf", "diffusion"),
+    # 16 GB+ NVIDIA: "fast" takımı (INT8 convrot yayılım + dbcache; IQ3 kodlayıcı sonuçta bozulma yaptığı için kullanılmadı); diğer makineler ve eski Q4 kurulumları: "compact" takımı.
+    # Seçim Catalog::load -> ModelSpec::resolve_tier içinde; kullanıcı seçim yapmaz.
+    fast_params={"quant": "INT8 convrot", "cache_mode": "dbcache"},
+    files=[hf_file("unsloth/Qwen-Image-2.1-Turbo-GGUF", "qwen-image-2.1-turbo-Q4_K_M.gguf", "diffusion", only="compact"),
+           hf_file("Comfy-Org/Qwen-Image-2.1", "diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "diffusion", only="fast"),
            hf_file("unsloth/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "llm"),
            hf_file("unsloth/Qwen3-VL-8B-Instruct-GGUF", "mmproj-F16.gguf", "llm_vision", name="Qwen3-VL-8B-Instruct-mmproj-F16.gguf"),
            hf_file("unsloth/Qwen-Image-2.1-FP8", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae")])

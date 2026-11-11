@@ -16,7 +16,9 @@ pub struct FileSpec {
     #[serde(default)]
     pub sha256: Option<String>,
     pub size: u64,
-    /// "" = her makinede | "cuda" = yalnızca NVIDIA (PyTorch) | "cpu" = yalnızca NVIDIA olmayan makineler (ONNX)
+    /// "" = her makinede | "cuda" = yalnızca NVIDIA (PyTorch) | "cpu" = yalnızca NVIDIA olmayan makineler (ONNX) |
+    /// "fast" = yalnızca 16 GB+ NVIDIA (hızlı dosya takımı) | "compact" = diğer makineler ya da eski kurulum (küçük takım);
+    /// "fast"/"compact" `Catalog::load` içinde çözülür (bkz. `ModelSpec::resolve_tier`).
     #[serde(default)]
     pub only: String,
 }
@@ -57,6 +59,9 @@ pub struct ModelSpec {
     /// Modele özel sabitler: steps, guidance, cfg, sampler, input_mode (original|green|lama_prefill), prompt / prompt_green / prompt_lama_prefill, offload, pipeline, max_width, max_pixels, seg_h, overlap.
     #[serde(default)]
     pub params: serde_json::Value,
+    /// "fast" dosya takımı seçilince `params` üzerine eklenen/ezilen değerler (örn. önbellek ayarı, nicemleme etiketi).
+    #[serde(default)]
+    pub fast_params: serde_json::Value,
     #[serde(default)]
     pub files: Vec<FileSpec>,
 }
@@ -80,16 +85,51 @@ impl Catalog {
                 }
             }
         }
+        for m in c.models.iter_mut() {
+            m.resolve_tier(paths);
+        }
         c
     }
     pub fn get(&self, id: &str) -> Option<&ModelSpec> { self.models.iter().find(|m| m.id == id) }
 }
 
+/// "fast" takımı için en az ekran belleği (16 GB kartlar ~15,99 GB bildirir).
+pub const FAST_MIN_VRAM_GB: f64 = 15.0;
+
 impl ModelSpec {
+    /// "fast"/"compact" dosya takımlarından birini seçer, ötekini listeden çıkarır. Fast: NVIDIA ve ≥ 16 GB VRAM; ancak
+    /// bu makinede küçük takım eksiksiz kuruluysa ve fast takım değilse eski kurulum bozulmasın diye küçük takım kalır
+    /// (yeniden indirme yok; model silinip yeniden kurulunca fast gelir).
+    pub fn resolve_tier(&mut self, paths: &AppPaths) {
+        if !self.files.iter().any(|f| f.only == "fast" || f.only == "compact") {
+            return;
+        }
+        let hw = hardware();
+        let eligible = hw.nvidia() && hw.vram_gb >= FAST_MIN_VRAM_GB;
+        let dir = self.dir(paths);
+        let marker_ok = self.marker(paths).exists();
+        let complete = |tier: &str| {
+            marker_ok
+                && self.files.iter().filter(|f| f.only == tier || f.only.is_empty()).all(|f| std::fs::metadata(dir.join(&f.name)).map(|m| m.len() == f.size).unwrap_or(false))
+        };
+        let fast = eligible && !(complete("compact") && !complete("fast"));
+        let (keep, drop) = if fast { ("fast", "compact") } else { ("compact", "fast") };
+        self.files.retain(|f| f.only != drop);
+        for f in self.files.iter_mut().filter(|f| f.only == keep) {
+            f.only.clear();
+        }
+        if fast {
+            if let (Some(p), Some(fp)) = (self.params.as_object_mut(), self.fast_params.as_object()) {
+                for (k, v) in fp {
+                    p.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
     /// Bu makinede gerçekten indirilecek/kullanılacak dosyalar (`only` süzgeci).
     pub fn active_files(&self) -> Vec<&FileSpec> {
         let cuda = hardware().nvidia();
-        self.files.iter().filter(|f| match f.only.as_str() { "cuda" => cuda, "cpu" => !cuda, _ => true }).collect()
+        self.files.iter().filter(|f| match f.only.as_str() { "cuda" => cuda, "cpu" => !cuda, "fast" | "compact" => false, _ => true }).collect()
     }
     pub fn total_size(&self) -> u64 { self.active_files().iter().map(|f| f.size).sum() }
     /// Bu modelin çalışması için otomatik kurulacak çalışma ortamları (kullanıcıdan gizli).
