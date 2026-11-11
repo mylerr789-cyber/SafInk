@@ -5,6 +5,7 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+- Linux desteği (deneysel): AppImage ve .deb.
 - Flux ve Qwen'in çıktısı artık doğrudan temiz sayfa olarak kullanılıyor; tramlı zeminde yazının yerinde kalan açık dikdörtgenler ve kutu kenarları gitti.
 - Düşük VRAM modu (Tercihler ▸ Temizleme): 12 GB'tan küçük kartlarda kendiliğinden açık. Qwen'in bellek ihtiyacı 14 GB'tan ~11 GB'a, Flux'ınki 6 GB'tan 5 GB'a iniyor; biraz daha yavaş.
 - Hangi modelin neye iyi olduğunu anlatan model rehberi (Türkçe ve İngilizce).

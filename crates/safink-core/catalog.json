@@ -88,7 +88,17 @@
      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-win-vulkan-x64.zip",
      "sha256": "c26c8b5c63c2d913b55ebf0d34f7569c1e83292db6593cb391cb306987c2b678",
      "size": 29947836,
-     "only": ""
+     "only": "",
+     "os": "windows"
+    },
+    {
+     "name": "sd-master-3d315c4-bin-Linux-Ubuntu-26.04-x86_64-vulkan.zip",
+     "role": "archive",
+     "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-Linux-Ubuntu-26.04-x86_64-vulkan.zip",
+     "sha256": "7ccebce61ab451958b54f5054ad9ac7ffaa17fa63fd4296ee354b5e5b55cd600",
+     "size": 41797819,
+     "only": "",
+     "os": "linux"
     }
    ]
   },
@@ -109,7 +119,8 @@
      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-win-cuda12-x64.zip",
      "sha256": "8bf0ea1bf67658342b289222c36bd9fb78fa4329044a42538e60fdeb3a3e4883",
      "size": 366924965,
-     "only": ""
+     "only": "",
+     "os": "windows"
     },
     {
      "name": "cudart-sd-bin-win-cu12-x64.zip",
@@ -117,7 +128,8 @@
      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/cudart-sd-bin-win-cu12-x64.zip",
      "sha256": "fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d",
      "size": 563452046,
-     "only": ""
+     "only": "",
+     "os": "windows"
     }
    ]
   },
@@ -138,7 +150,17 @@
      "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-win-cpu-x64.zip",
      "sha256": "70756796076372b831ef2a4e27673e86b4aa33db1df8aa8e2ec955424fb805c8",
      "size": 18172997,
-     "only": ""
+     "only": "",
+     "os": "windows"
+    },
+    {
+     "name": "sd-master-3d315c4-bin-Linux-Ubuntu-26.04-x86_64.zip",
+     "role": "archive",
+     "url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1063-3d315c4/sd-master-3d315c4-bin-Linux-Ubuntu-26.04-x86_64.zip",
+     "sha256": "2681aee041acee12d3bf401ca71c6cf5ce2e54826d07d42eaab7b54936923f3d",
+     "size": 28920718,
+     "only": "",
+     "os": "linux"
     }
    ]
   },

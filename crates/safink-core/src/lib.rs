@@ -10,6 +10,7 @@ pub mod loc;
 pub mod maskops;
 pub mod paths;
 pub mod pipeline;
+pub mod proc;
 pub mod settings;
 pub mod tiles;
 

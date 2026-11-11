@@ -79,6 +79,7 @@ fn emit_page(e: &Engine, id: i64) {
 
 impl Engine {
     pub fn new(paths: AppPaths, emit: Arc<dyn Fn(Event) + Send + Sync>) -> Result<Arc<Self>> {
+        crate::api::set_secret_dir(paths.root.clone());
         let settings = Settings::load(&paths);
         let catalog = Catalog::load(&paths, settings.low_vram);
         let db = Db::open(&paths.db())?;

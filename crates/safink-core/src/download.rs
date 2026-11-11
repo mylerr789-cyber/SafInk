@@ -137,7 +137,34 @@ pub fn extract_zip(zip_path: &Path, out: &Path) -> Result<()> {
             let mut o = std::fs::File::create(&target)?;
             std::io::copy(&mut e, &mut o)?;
             o.flush()?;
+            drop(o);
+            #[cfg(unix)]
+            if let Some(mode) = e.unix_mode() {
+                use std::os::unix::fs::PermissionsExt;
+                // çalıştırma biti (sd-cli, sd-server, *.so) korunur
+                let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode & 0o777 | 0o600));
+            }
         }
+    }
+    Ok(())
+}
+
+/// `.tar.gz` çıkarır; `strip` baştaki dizin bileşeni sayısını atlar. Modlar (çalıştırma biti) korunur.
+pub fn extract_tar_gz(path: &Path, out: &Path, strip: usize) -> Result<()> {
+    std::fs::create_dir_all(out)?;
+    let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(std::fs::File::open(path)?));
+    for entry in ar.entries()? {
+        let mut entry = entry?;
+        let rel: std::path::PathBuf = entry.path()?.components().skip(strip).collect();
+        // yol kaçışına karşı: yalnızca normal bileşenler
+        if rel.as_os_str().is_empty() || !rel.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+            continue;
+        }
+        let target = out.join(&rel);
+        if let Some(p) = target.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        entry.unpack(&target)?;
     }
     Ok(())
 }

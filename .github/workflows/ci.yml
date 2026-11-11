@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, linux-support]
   pull_request:
     branches: [main]
 jobs:
@@ -23,3 +23,26 @@ jobs:
       - run: npm --prefix ui run check
       - run: npm --prefix ui run build
       - run: cargo check --workspace
+  check-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Tauri Linux önkoşulları
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file pkg-config libssl-dev libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npm --prefix ui ci
+      - run: npm --prefix ui run check
+      - run: npm --prefix ui run build
+      - run: cargo check --workspace
+      - run: cargo test -p safink-core

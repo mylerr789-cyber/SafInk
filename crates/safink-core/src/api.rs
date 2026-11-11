@@ -18,13 +18,54 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Linux: Secret Service (GNOME Keyring / KWallet) yoksa sırlar uygulama veri dizinindeki 0600 dosyaya yazılır.
+static SECRET_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+pub fn set_secret_dir(p: std::path::PathBuf) {
+    let _ = SECRET_DIR.set(p);
+}
+
+#[cfg(target_os = "linux")]
+mod secret_file {
+    use std::collections::BTreeMap;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fn path() -> Option<std::path::PathBuf> { Some(super::SECRET_DIR.get()?.join("secrets.json")) }
+    fn load() -> BTreeMap<String, String> {
+        path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    }
+    pub fn get(name: &str) -> Option<String> { load().remove(name).filter(|s| !s.is_empty()) }
+    pub fn set(name: &str, v: &str) {
+        let Some(p) = path() else { return };
+        let mut m = load();
+        m.insert(name.to_string(), v.to_string());
+        let tmp = p.with_extension("json.tmp");
+        let ok = (|| -> std::io::Result<()> {
+            let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+            f.write_all(&serde_json::to_vec(&m).unwrap_or_default())?;
+            f.flush()?;
+            std::fs::rename(&tmp, &p)
+        })();
+        if ok.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
 fn keyring_get(name: &str) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, name).ok()?.get_password().ok().filter(|s| !s.is_empty())
+    let v = keyring::Entry::new(KEYRING_SERVICE, name).ok().and_then(|e| e.get_password().ok()).filter(|s| !s.is_empty());
+    #[cfg(target_os = "linux")]
+    let v = v.or_else(|| secret_file::get(name));
+    v
 }
 fn keyring_set(name: &str, v: &str) {
-    if let Ok(e) = keyring::Entry::new(KEYRING_SERVICE, name) {
-        let _ = e.set_password(v);
+    let ok = keyring::Entry::new(KEYRING_SERVICE, name).and_then(|e| e.set_password(v)).is_ok();
+    #[cfg(target_os = "linux")]
+    if !ok {
+        secret_file::set(name, v);
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = ok;
 }
 
 /// Kurulum başına anonim kimlik: install_id üretir, sunucudan jeton alır, saklar, süre dolunca yeniler.

@@ -4,13 +4,15 @@
 
 **English** · [Türkçe](README.md)
 
-A Windows app that removes text from manga and webtoon pages.
+A Windows and Linux (experimental) app that removes text from manga and webtoon pages.
 Drop your pages in, the text is found automatically, and one click cleans it. Missed or wrongly marked spots can be fixed with a brush.
 
 ## Download
 
 Get `SafInk_x.y.z_x64-setup.exe` from the [Releases](../../releases) page and install it.
 If Windows warns about an unknown publisher, choose **More info ▸ Run anyway**.
+
+**Linux (experimental):** run the `SafInk_x.y.z_amd64.AppImage` with `chmod +x SafInk_*.AppImage`, or install the `.deb` with `sudo apt install ./SafInk_*.deb`. Requires `webkit2gtk-4.1`. The GPU is used through Vulkan (NVIDIA included); the sd.cpp runtime is downloaded on first install.
 The app updates itself when a new version is out.
 
 ## Usage

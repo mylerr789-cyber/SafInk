@@ -100,7 +100,19 @@ async fn export_pages(eng: Eng<'_>, page_ids: Vec<i64>, out_dir: Option<String>)
     .map_err(e2s)
 }
 #[tauri::command]
-fn reveal_path(path: String) { let _ = std::process::Command::new("explorer").arg(path).spawn(); }
+fn reveal_path(path: String) {
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(not(windows))]
+    {
+        // Linux: dosya yöneticisini xdg-open ile aç (dosya verilirse klasörü)
+        let p = std::path::PathBuf::from(&path);
+        let dir = if p.is_file() { p.parent().map(|d| d.to_path_buf()).unwrap_or(p) } else { p };
+        if let Ok(mut c) = std::process::Command::new("xdg-open").arg(dir).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+            std::thread::spawn(move || { let _ = c.wait(); }); // zombi süreç kalmasın
+        }
+    }
+}
 
 // ---------- dÃ¼zenleme katmanÄ± ----------
 /// Ham gÃ¶vde: [u32 tx][u32 ty][1024*1024 bayt] kayÄ±tlarÄ±. Sayfa id'si `x-page-id` baÅŸlÄ±ÄŸÄ±nda.

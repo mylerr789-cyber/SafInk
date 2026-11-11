@@ -69,23 +69,25 @@ rel = get("https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/tag
 tag = rel["tag_name"]
 
 
-def asset(sub):
+def asset(sub, os_):
+    # os_: "windows" | "linux" (FileSpec.os; bkz. catalog.rs). Linux'ta yalnızca CPU ve Vulkan derlemeleri yayımlanıyor (CUDA yok:
+    # NVIDIA da Linux'ta Vulkan kullanır).
     for a in rel["assets"]:
         if sub in a["name"]:
             return {"name": a["name"], "role": "archive", "url": a["browser_download_url"],
-                    "sha256": (a.get("digest") or "").replace("sha256:", "") or None, "size": a["size"], "only": ""}
+                    "sha256": (a.get("digest") or "").replace("sha256:", "") or None, "size": a["size"], "only": "", "os": os_}
     raise SystemExit("asset yok " + sub)
 
 
 add(id="tool-sdcpp-vulkan", name=f"sd.cpp {tag} Vulkan", backend="tool", kind="runtime", variant="vulkan",
     description="NVIDIA dışı ekran kartları (AMD/Intel).", description_en="Non-NVIDIA graphics cards (AMD/Intel).", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
-    files=[asset("bin-win-vulkan-x64")])
+    files=[asset("bin-win-vulkan-x64", "windows"), asset("bin-Linux-Ubuntu-26.04-x86_64-vulkan", "linux")])
 add(id="tool-sdcpp-cuda12", name=f"sd.cpp {tag} CUDA 12", backend="tool", kind="runtime", variant="cuda12",
     description="NVIDIA ekran kartları.", description_en="NVIDIA graphics cards.", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
-    files=[asset("bin-win-cuda12-x64"), asset("cudart-sd-bin-win-cu12")])
+    files=[asset("bin-win-cuda12-x64", "windows"), asset("cudart-sd-bin-win-cu12", "windows")])
 add(id="tool-sdcpp-cpu", name=f"sd.cpp {tag} CPU", backend="tool", kind="runtime", variant="cpu",
     description="Ekran kartı yok.", description_en="No graphics card.", license="MIT", license_url="https://github.com/leejet/stable-diffusion.cpp",
-    files=[asset("bin-win-cpu-x64")])
+    files=[asset("bin-win-cpu-x64", "windows"), asset("bin-Linux-Ubuntu-26.04-x86_64.zip", "linux")])
 add(id="tool-sdnq-env", name="Python ortamı", backend="tool", kind="runtime", variant="python",
     description="uv ile yönetilen Python 3.12 + torch (CUDA) + diffusers + sdnq + spandrel.", description_en="Python 3.12 managed by uv + torch (CUDA) + diffusers + sdnq + spandrel.", license="BSD/Apache", license_url="https://github.com/Disty0/sdnq",
     files=[])

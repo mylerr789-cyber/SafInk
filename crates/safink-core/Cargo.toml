@@ -4,8 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["directml"]
-directml = ["ort/directml"]
+default = []
 cuda = ["ort/cuda"]
 
 [dependencies]
@@ -20,7 +19,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 sha2 = "0.10"
 hex = "0.4"
 ort = { version = "2.0.0-rc.10", features = ["ndarray"] }
-keyring = { version = "3", features = ["windows-native"] }
+flate2 = "1"
+tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 rand = "0.8"
 base64 = "0.22"
@@ -29,3 +29,13 @@ parking_lot = "0.12"
 
 [dev-dependencies]
 anyhow = "1"
+
+[target.'cfg(windows)'.dependencies]
+# DirectML'li ONNX Runtime derlemesi yalnızca Windows'ta vardır; Linux'ta varsayılan CPU derlemesi indirilir.
+ort = { version = "2.0.0-rc.10", features = ["ndarray", "directml"] }
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Gizli bilgi: Secret Service (zbus, libdbus gerekmez); yoksa dosya yedeği (api.rs).
+keyring = { version = "3", features = ["async-secret-service", "crypto-rust"] }
+libc = "0.2"

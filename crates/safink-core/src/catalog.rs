@@ -21,7 +21,13 @@ pub struct FileSpec {
     /// "fast"/"compact" `Catalog::load` içinde çözülür (bkz. `ModelSpec::resolve_tier`).
     #[serde(default)]
     pub only: String,
+    /// "" = her işletim sisteminde | "windows" | "linux" (çalışma ortamı arşivleri için).
+    #[serde(default)]
+    pub os: String,
 }
+
+/// Çalışılan işletim sisteminin `FileSpec::os` etiketi.
+pub const fn host_os() -> &'static str { if cfg!(windows) { "windows" } else { "linux" } }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelSpec {
@@ -105,7 +111,8 @@ impl ModelSpec {
             return;
         }
         let hw = hardware();
-        let eligible = hw.nvidia() && hw.vram_gb >= FAST_MIN_VRAM_GB;
+        // INT8 convrot + dbcache yolu sd.cpp CUDA derlemesine göre ayarlı; Linux'ta (Vulkan) kullanılmaz
+        let eligible = cfg!(windows) && hw.nvidia() && hw.vram_gb >= FAST_MIN_VRAM_GB;
         let dir = self.dir(paths);
         let marker_ok = self.marker(paths).exists();
         let complete = |tier: &str| {
@@ -131,14 +138,15 @@ impl ModelSpec {
     /// Bu makinede gerçekten indirilecek/kullanılacak dosyalar (`only` süzgeci).
     pub fn active_files(&self) -> Vec<&FileSpec> {
         let cuda = hardware().nvidia();
-        self.files.iter().filter(|f| match f.only.as_str() { "cuda" => cuda, "cpu" => !cuda, "fast" | "compact" => false, _ => true }).collect()
+        self.files.iter().filter(|f| (f.os.is_empty() || f.os == host_os()) && match f.only.as_str() { "cuda" => cuda, "cpu" => !cuda, "fast" | "compact" => false, _ => true }).collect()
     }
     pub fn total_size(&self) -> u64 { self.active_files().iter().map(|f| f.size).sum() }
     /// Bu modelin çalışması için otomatik kurulacak çalışma ortamları (kullanıcıdan gizli).
     pub fn runtime_ids(&self) -> Vec<&'static str> {
         let hw = hardware();
         match self.backend.as_str() {
-            "sdcpp" => vec![match hw.gpu_kind.as_str() { "nvidia" => "tool-sdcpp-cuda12", "other" => "tool-sdcpp-vulkan", _ => "tool-sdcpp-cpu" }],
+            // Linux'ta sd.cpp CUDA derlemesi yayımlanmıyor: NVIDIA da Vulkan kullanır
+            "sdcpp" => vec![match hw.gpu_kind.as_str() { "nvidia" if cfg!(windows) => "tool-sdcpp-cuda12", "nvidia" | "other" => "tool-sdcpp-vulkan", _ => "tool-sdcpp-cpu" }],
             "sdnq" => vec!["tool-sdnq-env"],
             "lama" if hw.nvidia() => vec!["tool-sdnq-env"],
             _ => vec![],
@@ -164,7 +172,7 @@ impl ModelSpec {
     pub fn is_installed(&self, paths: &AppPaths) -> bool {
         match (self.backend.as_str(), self.variant.as_str()) {
             ("tool", "python") => crate::inpaint::pyworker::env_ready(paths),
-            ("tool", _) => self.tool_dir(paths).join("sd-cli.exe").exists(),
+            ("tool", _) => self.tool_dir(paths).join(crate::inpaint::sdcpp::SDCLI).exists(),
             _ => {
                 let files = self.active_files();
                 if files.is_empty() || !self.marker(paths).exists() {
@@ -190,7 +198,7 @@ impl ModelSpec {
     }
     /// Bu çalışma ortamının (tool) ilerleme çubuğundaki ağırlığı.
     pub fn runtime_weight(&self) -> u64 {
-        if self.variant == "python" { ENV_BYTES } else { self.files.iter().map(|f| f.size).sum() }
+        if self.variant == "python" { ENV_BYTES } else { self.active_files().iter().map(|f| f.size).sum() }
     }
 }
 
@@ -214,6 +222,7 @@ impl Hardware {
     pub fn nvidia(&self) -> bool { self.gpu_kind == "nvidia" }
 }
 
+#[cfg(windows)]
 fn no_window(cmd: &mut std::process::Command) -> &mut std::process::Command {
     #[cfg(windows)]
     {
@@ -241,6 +250,7 @@ pub fn hardware() -> &'static Hardware {
     })
 }
 
+#[cfg(windows)]
 pub fn detect_hardware() -> Hardware {
     let mut hw = Hardware::default();
     if let Ok(o) = no_window(std::process::Command::new("nvidia-smi").args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])).output() {
@@ -293,6 +303,88 @@ pub fn detect_hardware() -> Hardware {
         hw.gpu_kind = "none".into();
     }
     hw
+}
+
+/// Linux: NVIDIA için nvidia-smi (ad + VRAM); diğer ekran kartları için `vulkaninfo --summary`,
+/// olmazsa /sys/class/drm (üretici kimliği; amdgpu ise VRAM de okunur). Hiçbiri yoksa "none".
+#[cfg(not(windows))]
+pub fn detect_hardware() -> Hardware {
+    let mut hw = Hardware::default();
+    if let Ok(t) = std::fs::read_to_string("/proc/meminfo") {
+        if let Some(kb) = t.lines().find_map(|l| l.strip_prefix("MemTotal:")).and_then(|l| l.split_whitespace().next()).and_then(|v| v.parse::<f64>().ok()) {
+            hw.ram_gb = kb / 1024.0 / 1024.0;
+        }
+    }
+    if let Ok(o) = std::process::Command::new("nvidia-smi").args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]).output() {
+        if o.status.success() {
+            if let Some(line) = String::from_utf8_lossy(&o.stdout).lines().next() {
+                let mut it = line.split(',');
+                hw.gpu_name = it.next().unwrap_or("").trim().to_string();
+                hw.vram_gb = it.next().and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(0.0) / 1024.0;
+                if !hw.gpu_name.is_empty() {
+                    hw.gpu_kind = "nvidia".into();
+                }
+            }
+        }
+    }
+    if hw.gpu_kind.is_empty() {
+        if let Some((name, nv)) = vulkan_gpu() {
+            hw.gpu_kind = if nv { "nvidia" } else { "other" }.into();
+            hw.gpu_name = name;
+        } else if let Some((name, nv, vram)) = drm_gpu() {
+            hw.gpu_kind = if nv { "nvidia" } else { "other" }.into();
+            hw.gpu_name = name;
+            hw.vram_gb = vram;
+        }
+    }
+    if hw.gpu_kind.is_empty() {
+        hw.gpu_kind = "none".into();
+    }
+    hw
+}
+
+/// `vulkaninfo --summary` çıktısından ilk gerçek (yazılım olmayan) aygıt: (ad, NVIDIA mı).
+#[cfg(not(windows))]
+fn vulkan_gpu() -> Option<(String, bool)> {
+    let o = std::process::Command::new("vulkaninfo").arg("--summary").output().ok()?;
+    if !o.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&o.stdout).lines().find_map(|l| {
+        let name = l.trim().strip_prefix("deviceName")?.trim_start().strip_prefix('=')?.trim().to_string();
+        let low = name.to_lowercase();
+        (!name.is_empty() && !low.contains("llvmpipe") && !low.contains("softpipe") && !low.contains("swiftshader") && !low.contains("lavapipe")).then(|| {
+            let nv = low.contains("nvidia");
+            (name, nv)
+        })
+    })
+}
+
+/// /sys/class/drm/card*/device: üretici kimliğine göre (ad, NVIDIA mı, VRAM GB).
+#[cfg(not(windows))]
+fn drm_gpu() -> Option<(String, bool, f64)> {
+    let mut best: Option<(String, bool, f64)> = None;
+    let mut cards: Vec<_> = std::fs::read_dir("/sys/class/drm").ok()?.flatten().filter(|e| {
+        let n = e.file_name().to_string_lossy().to_string();
+        n.starts_with("card") && n[4..].chars().all(|c| c.is_ascii_digit())
+    }).collect();
+    cards.sort_by_key(|e| e.file_name());
+    for c in cards {
+        let dev = c.path().join("device");
+        let vendor = std::fs::read_to_string(dev.join("vendor")).unwrap_or_default().trim().to_lowercase();
+        let (name, nv) = match vendor.as_str() {
+            "0x10de" => ("NVIDIA GPU", true),
+            "0x1002" => ("AMD GPU", false),
+            "0x8086" => ("Intel GPU", false),
+            _ => continue,
+        };
+        let vram = std::fs::read_to_string(dev.join("mem_info_vram_total")).ok().and_then(|t| t.trim().parse::<f64>().ok()).map(|b| b / 1024.0 / 1024.0 / 1024.0).unwrap_or(0.0);
+        // ayrık kart (VRAM'i bilinen) tümleşik olana tercih edilir
+        if best.as_ref().map(|b| vram > b.2).unwrap_or(true) {
+            best = Some((name.to_string(), nv, vram));
+        }
+    }
+    best
 }
 
 /// "fits" | "tight" | "no" | "slow" | "unknown"

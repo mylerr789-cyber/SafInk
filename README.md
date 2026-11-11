@@ -4,13 +4,15 @@
 
 [English](README.en.md) · **Türkçe**
 
-Manga ve webtoon sayfalarındaki yazıları temizleyen Windows uygulaması.
+Manga ve webtoon sayfalarındaki yazıları temizleyen Windows ve Linux (deneysel) uygulaması.
 Sayfaları bırakın, yazılar bulunsun, tek tıkla temizlensin. Kaçan ya da yanlış işaretlenen yerleri fırçayla düzeltebilirsiniz.
 
 ## İndir
 
 [Releases](../../releases) sayfasından `SafInk_x.y.z_x64-setup.exe` dosyasını indirip kurun.
 Windows "bilinmeyen yayıncı" uyarısı verirse **Ek bilgi ▸ Yine de çalıştır**.
+
+**Linux (deneysel):** `SafInk_x.y.z_amd64.AppImage` için `chmod +x SafInk_*.AppImage` ile çalıştırın, ya da `.deb` için `sudo apt install ./SafInk_*.deb`. Gerekli: `webkit2gtk-4.1`. Ekran kartı Vulkan ile kullanılır (NVIDIA dahil); ilk kurulumda sd.cpp çalışma ortamı indirilir.
 Yeni sürüm çıkınca uygulama kendini günceller.
 
 ## Kullanım

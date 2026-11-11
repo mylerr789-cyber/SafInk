@@ -7,7 +7,7 @@ use crate::settings::Settings;
 use anyhow::{anyhow, bail, Context, Result};
 use image::{GrayImage, RgbImage};
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 
@@ -25,14 +25,33 @@ pub struct SdCppInpainter {
 
 const SEED: i64 = 1;
 
+/// sd.cpp komut satırı yürütülebilir adı.
+pub const SDCLI: &str = if cfg!(windows) { "sd-cli.exe" } else { "sd-cli" };
+
+/// Linux: paylaşımlı kütüphaneler (libstable-diffusion.so, libggml*.so) yürütülebilirin yanındadır.
+pub fn lib_path_env(cmd: &mut std::process::Command, exe: &Path) {
+    #[cfg(target_os = "linux")]
+    if let Some(d) = exe.parent() {
+        let mut v = d.as_os_str().to_owned();
+        if let Some(old) = std::env::var_os("LD_LIBRARY_PATH").filter(|s| !s.is_empty()) {
+            v.push(":");
+            v.push(old);
+        }
+        cmd.env("LD_LIBRARY_PATH", v);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (cmd, exe);
+}
+
 /// Donanıma uygun sd.cpp derlemesini bulur (NVIDIA: CUDA 12, diğer GPU: Vulkan, GPU yok: CPU); yoksa kurulu olan ilk derleme.
 pub fn find_sdcli(paths: &AppPaths) -> Option<PathBuf> {
     let want = match crate::catalog::hardware().gpu_kind.as_str() {
-        "nvidia" => ["cuda12", "vulkan", "cpu"],
-        "other" => ["vulkan", "cpu", "cuda12"],
+        "nvidia" if cfg!(windows) => ["cuda12", "vulkan", "cpu"],
+        // Linux'ta CUDA derlemesi yok: NVIDIA da Vulkan kullanır
+        "nvidia" | "other" => ["vulkan", "cpu", "cuda12"],
         _ => ["cpu", "vulkan", "cuda12"],
     };
-    want.into_iter().map(|v| paths.tools().join(v).join("sd-cli.exe")).find(|p| p.exists())
+    want.into_iter().map(|v| paths.tools().join(v).join(SDCLI)).find(|p| p.exists())
 }
 
 impl SdCppInpainter {
@@ -183,6 +202,7 @@ impl Inpainter for SdCppInpainter {
         padded.save(&inp)?;
         let mut cmd = Command::new(&self.exe);
         cmd.current_dir(self.exe.parent().unwrap());
+        lib_path_env(&mut cmd, &self.exe);
         cmd.args(self.model_args());
         cmd.args(self.gen_args());
         let prompt = self.prep.prompt.clone();
@@ -199,7 +219,7 @@ impl Inpainter for SdCppInpainter {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
         }
-        let mut child = cmd.spawn().with_context(|| format!("sd-cli başlatılamadı: {}", self.exe.display()))?;
+        let mut child = crate::proc::spawn_tied(cmd).with_context(|| format!("sd-cli başlatılamadı: {}", self.exe.display()))?;
         // iptal edilebilir bekleme
         let status = loop {
             if ctx.cancel.load(Ordering::Relaxed) {

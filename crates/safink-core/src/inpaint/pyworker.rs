@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const ENV_VERSION: &str = "v2";
 
 fn marker(paths: &AppPaths) -> PathBuf { paths.python_env().join(".safink_ready") }
-pub fn python_exe(paths: &AppPaths) -> PathBuf { paths.python_env().join("Scripts").join("python.exe") }
+pub fn python_exe(paths: &AppPaths) -> PathBuf { if cfg!(windows) { paths.python_env().join("Scripts").join("python.exe") } else { paths.python_env().join("bin").join("python") } }
 pub fn env_ready(paths: &AppPaths) -> bool {
     python_exe(paths).exists() && std::fs::read_to_string(marker(paths)).map(|t| t.trim() == ENV_VERSION).unwrap_or(false)
 }
@@ -26,9 +26,9 @@ pub fn no_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// uv'yi bulur: tools/uv/uv.exe, sonra PATH.
+/// uv'yi bulur: tools/uv/uv(.exe), sonra PATH.
 pub fn find_uv(paths: &AppPaths) -> Option<PathBuf> {
-    let local = paths.tools().join("uv").join("uv.exe");
+    let local = paths.tools().join("uv").join(if cfg!(windows) { "uv.exe" } else { "uv" });
     if local.exists() {
         return Some(local);
     }
@@ -46,23 +46,26 @@ pub async fn ensure_uv(client: &reqwest::Client, paths: &AppPaths, cancel: &Atom
         return Ok(p);
     }
     let rel: serde_json::Value = client.get("https://api.github.com/repos/astral-sh/uv/releases/latest").header("User-Agent", "safink").send().await?.json().await?;
-    let asset = rel["assets"]
-        .as_array()
-        .and_then(|a| a.iter().find(|x| x["name"] == "uv-x86_64-pc-windows-msvc.zip"))
-        .ok_or_else(|| anyhow!("uv sürümü bulunamadı"))?;
+    let want = if cfg!(windows) { "uv-x86_64-pc-windows-msvc.zip" } else { "uv-x86_64-unknown-linux-gnu.tar.gz" };
+    let asset = rel["assets"].as_array().and_then(|a| a.iter().find(|x| x["name"] == want)).ok_or_else(|| anyhow!("uv sürümü bulunamadı"))?;
     let spec = FileSpec {
-        name: "uv.zip".into(),
+        name: want.into(),
         role: "archive".into(),
         url: asset["browser_download_url"].as_str().unwrap_or_default().to_string(),
         sha256: asset["digest"].as_str().map(|d| d.trim_start_matches("sha256:").to_string()),
         size: asset["size"].as_u64().unwrap_or(0),
         only: String::new(),
+        os: String::new(),
     };
     let dir = paths.tools().join("uv");
-    let zip = dir.join("uv.zip");
-    crate::download::download_file(client, &spec, &zip, "", cancel, &|_, _| {}, &|_| {}).await?;
-    crate::download::extract_zip(&zip, &dir)?;
-    find_uv(paths).ok_or_else(|| anyhow!("uv.exe çıkarılamadı"))
+    let arc = dir.join(want);
+    crate::download::download_file(client, &spec, &arc, "", cancel, &|_, _| {}, &|_| {}).await?;
+    if cfg!(windows) {
+        crate::download::extract_zip(&arc, &dir)?;
+    } else {
+        crate::download::extract_tar_gz(&arc, &dir, 1)?; // uv-x86_64-unknown-linux-gnu/uv -> uv
+    }
+    find_uv(paths).ok_or_else(|| anyhow!("uv çıkarılamadı"))
 }
 
 fn run_logged(cmd: &mut Command, log: &(dyn Fn(&str) + Send + Sync), cancel: &AtomicBool) -> Result<()> {
@@ -146,7 +149,8 @@ impl PyWorker {
         std::fs::write(&script, source)?;
         let mut cmd = Command::new(python_exe(paths));
         cmd.args(["-I", "-u"]).arg(&script).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::from(std::fs::File::create(workdir.join("worker.log"))?));
-        let mut child = no_window(&mut cmd).spawn().context("python worker başlatılamadı")?;
+        no_window(&mut cmd);
+        let mut child = crate::proc::spawn_tied(cmd).context("python worker başlatılamadı")?;
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Ok(Self { child, stdin, stdout, workdir })

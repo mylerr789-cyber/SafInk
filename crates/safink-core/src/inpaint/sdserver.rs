@@ -1,6 +1,6 @@
 //! stable-diffusion.cpp `sd-server` yöneticisi: model bir kez yüklenir, sayfalar HTTP ile gönderilir.
 //! Süreç model/argüman anahtarı başına tek; iş bitince canlı kalır, 10 dk boşta kalırsa, başka model seçilince
-//! ya da uygulama kapanınca kapatılır. Windows'ta süreç bir job nesnesine bağlanır (uygulama ölürse sunucu da ölür).
+//! ya da uygulama kapanınca kapatılır. Windows'ta süreç bir job nesnesine, Linux'ta PDEATHSIG'e bağlanır (uygulama ölürse sunucu da ölür).
 use anyhow::{anyhow, bail, Context, Result};
 use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ pub fn enabled() -> bool {
 }
 
 pub fn server_exe(cli: &Path) -> Option<PathBuf> {
-    let p = cli.parent()?.join("sd-server.exe");
+    let p = cli.parent()?.join(if cfg!(windows) { "sd-server.exe" } else { "sd-server" });
     p.exists().then_some(p)
 }
 
@@ -162,6 +162,7 @@ pub fn ensure(exe: &Path, args: &[std::ffi::OsString], key: &str, log: &Path, ca
     let logf = std::fs::File::create(log)?;
     let mut cmd = Command::new(exe);
     cmd.current_dir(exe.parent().unwrap_or(Path::new(".")));
+    super::sdcpp::lib_path_env(&mut cmd, exe);
     cmd.arg("--listen-ip").arg("127.0.0.1").arg("--listen-port").arg(port.to_string());
     cmd.args(args);
     cmd.stdin(Stdio::null()).stdout(Stdio::from(logf.try_clone()?)).stderr(Stdio::from(logf));
@@ -170,7 +171,7 @@ pub fn ensure(exe: &Path, args: &[std::ffi::OsString], key: &str, log: &Path, ca
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.spawn().with_context(|| format!("sd-server başlatılamadı: {}", exe.display()))?;
+    let mut child = crate::proc::spawn_tied(cmd).with_context(|| format!("sd-server başlatılamadı: {}", exe.display()))?;
     bind_to_job(&child);
     let t0 = Instant::now();
     loop {
