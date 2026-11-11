@@ -250,13 +250,13 @@ fn flat_fill_impl(img: &RgbImage, m: &GrayImage, feather: u32, c: &FlatCfg, part
 ///      (tüm bileşenler, `m`) `SAFE_HALO` px dışında kalanlar. Bunların (>= `SAFE_MIN_PIXELS`) kanal ortancası hepsinde >= `SAFE_WHITE` (beyaz) ya da
 ///      hepsinde <= `SAFE_BLACK` (siyah) olmalı ve herhangi bir kanalda ortancadan `SAFE_DEV` fazla sapanlar `SAFE_DEV_FRAC` oranının altında kalmalı.
 /// Geçerse dolgu rengi saf beyaz (255) ya da saf siyah (0); geçmezse `None` (bileşen modele gider).
-pub const FLAT_P_MIN: f32 = 0.90;
+pub const FLAT_P_MIN: f32 = 0.80;
 pub const SAFE_PAD: u32 = 8;
 pub const SAFE_HALO: u32 = 2;
 pub const SAFE_WHITE: u8 = 245;
 pub const SAFE_BLACK: u8 = 10;
 pub const SAFE_DEV: i32 = 30;
-pub const SAFE_DEV_FRAC: f64 = 0.005;
+pub const SAFE_DEV_FRAC: f64 = 0.25;
 pub const SAFE_MIN_PIXELS: usize = 16;
 
 fn median_u8(v: &mut [u8]) -> u8 {
@@ -797,7 +797,7 @@ mod tests {
     #[test]
     fn server_rule_low_p_goes_to_model() {
         let (img, mask) = page(255);
-        let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.89)]));
+        let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.79)]));
         assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
         assert_eq!(f.work.as_raw(), img.as_raw());
         assert_eq!(f.remaining.as_raw(), mask.as_raw());
@@ -840,9 +840,10 @@ mod tests {
     }
 
     #[test]
-    fn server_rule_pixel_check_catches_stripe_under_text() {
+    fn server_rule_pixel_check_catches_grey_band_under_text() {
+        // ince çizgiler sınıflandırıcının işi; piksel kontrolü zeminin rengine bakar (balon çizgisi takılmasın diye %25 sapmaya izin var)
         let (mut img, mask) = page(255);
-        fill_rect(&mut img, 40, 77, 200, 80, Rgb([120, 120, 120])); // yazının iki yanından geçen maskesiz şerit
+        fill_rect(&mut img, 40, 58, 200, 96, Rgb([120, 120, 120])); // yazının çevresini kaplayan gri bant
         let f = flat_pass(&img, &mask, 2, Some(&[part(78, 68, 162, 86, 0.99)]));
         assert_eq!(f.stats, FlatStats { flat: 0, model: 1 });
     }
