@@ -7,7 +7,7 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [0.5.0] - 2026-11-11
 
-- Linux desteği (deneysel): AppImage ve .deb.
+- Linux desteği (deneysel): AppImage ve .deb. Ubuntu 24.04, Debian 13, Fedora 39 veya daha yeni gerekir.
 - Flux ve Qwen'in çıktısı artık doğrudan temiz sayfa olarak kullanılıyor; tramlı zeminde yazının yerinde kalan açık dikdörtgenler ve kutu kenarları gitti.
 - Düşük VRAM modu (Tercihler ▸ Temizleme): 12 GB'tan küçük kartlarda kendiliğinden açık. Qwen'in bellek ihtiyacı 14 GB'tan ~11 GB'a, Flux'ınki 6 GB'tan 5 GB'a iniyor; biraz daha yavaş.
 - 4–6 GB NVIDIA kartlarda FLUX.2 Klein 4B (NVIDIA) artık çalışıyor (çok yavaş): Düşük VRAM modu MangaTranslator gibi ardışık işlemci boşaltma kullanıyor; sayfa başına GPU belleği ~7,8 GB yerine ~2,7 GB, çıktı aynı. Model kartı bu kartlarda "çok yavaş · düşük VRAM" diyor.

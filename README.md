@@ -12,7 +12,7 @@ Sayfaları bırakın, yazılar bulunsun, tek tıkla temizlensin. Kaçan ya da ya
 [Releases](../../releases) sayfasından `SafInk_x.y.z_x64-setup.exe` dosyasını indirip kurun.
 Windows "bilinmeyen yayıncı" uyarısı verirse **Ek bilgi ▸ Yine de çalıştır**.
 
-**Linux (deneysel):** `SafInk_x.y.z_amd64.AppImage` için `chmod +x SafInk_*.AppImage` ile çalıştırın, ya da `.deb` için `sudo apt install ./SafInk_*.deb`. Gerekli: `webkit2gtk-4.1`. Ekran kartı Vulkan ile kullanılır (NVIDIA dahil); ilk kurulumda sd.cpp çalışma ortamı indirilir.
+**Linux (deneysel):** `SafInk_x.y.z_amd64.AppImage` için `chmod +x SafInk_*.AppImage` ile çalıştırın, ya da `.deb` için `sudo apt install ./SafInk_*.deb`. Gerekli: `webkit2gtk-4.1` ve glibc 2.38+ (Ubuntu 24.04, Debian 13, Fedora 39 veya daha yeni). Ekran kartı Vulkan ile kullanılır (NVIDIA dahil); ilk kurulumda sd.cpp çalışma ortamı indirilir.
 Yeni sürüm çıkınca uygulama kendini günceller.
 
 ## Kullanım

@@ -19,7 +19,7 @@ jobs:
         include:
           - os: windows-latest
             args: --bundles nsis
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             args: --bundles appimage,deb
     runs-on: ${{ matrix.os }}
     steps:
@@ -49,7 +49,7 @@ jobs:
           $m = [regex]::Match($text, "(?ms)^## \[$([regex]::Escape($v))\][^`n]*`n(.*?)(?=^## \[|\z)")
           $body = if ($m.Success) { $m.Groups[1].Value.Trim() } else { "SafInk $v" }
           $body += "`n`n---`nWindows: SafInk_*_x64-setup.exe. SmartScreen uyarırsa: Ek bilgi > Yine de çalıştır / More info > Run anyway."
-          $body += "`nLinux (deneysel / experimental): SafInk_*_amd64.AppImage (chmod +x) veya SafInk_*_amd64.deb (sudo apt install ./SafInk_*.deb). Gerekli: webkit2gtk-4.1."
+          $body += "`nLinux (deneysel / experimental): SafInk_*_amd64.AppImage (chmod +x) veya SafInk_*_amd64.deb (sudo apt install ./SafInk_*.deb). Gerekli / requires: webkit2gtk-4.1, glibc 2.38+ (Ubuntu 24.04+)."
           "body<<SAFINK_EOF" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           $body | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
           "SAFINK_EOF" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
