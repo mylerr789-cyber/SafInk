@@ -12,6 +12,8 @@ Windows "bilinmeyen yayıncı" uyarısı verirse **Ek bilgi ▸ Yine de çalış
 
 ## Kullanım
 
+Hangi modeli seçeceğinizi bilmiyorsanız: [Model rehberi](docs/MODELLER.md).
+
 1. **Tercihler ▸ Modeller**'den bir model indirin (önerilen: *LaMa Manga*).
 2. Sayfaları ya da klasörü pencereye bırakın veya bir bölüm klasörü içe aktarın.
 3. **Sayfayı temizle** ya da **Bölümün tamamı**.
