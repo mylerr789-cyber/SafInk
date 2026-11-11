@@ -5,9 +5,13 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+## [0.5.2] - 2026-11-11
+
 - Düz renk doldurma artık yazının altından çizgi, şerit ya da tram geçen yerleri silmiyor; bu yazılar modele gidiyor (önceden beyaz zeminde ama arkasından çizgi geçen yazılar beyazla kapatılıp çizgiyi de siliyordu).
 - Sayfalar arasında geçerken temizlenmiş sayfa doğrudan sonuçla açılıyor (her seferinde maskeden sonuca geçmek gerekmiyor).
 - Yeni kurulum ekranı görseli ve GitHub sayfası afişi.
+
+*English:* Plain-colour fill no longer wipes lines, stripes or screentone passing under the text (those go to the model); cleaned pages open in result view when switching pages; new installer artwork and README banner.
 
 ## [0.5.1] - 2026-11-11
 
