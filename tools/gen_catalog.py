@@ -39,14 +39,14 @@ def add(**k):
     models.append(k)
 
 
-# MangaTranslator (meangrinch) ile aynı komut: kırpıntı referans görüntü + sabit metin; maske yalnızca geri yazmada kullanılır.
-EDIT_PROMPT = ("Erase only the Japanese lettering and sound effect characters. "
+# MangaTranslator (meangrinch, core/image/inpainting.py) komutu; "Japanese" sözcüğü çıkarıldı (İngilizce taramalarda orijinal
+# sözcükle İngilizce yazı kalıyordu). Kırpıntı referans görüntü + sabit metin; maske yalnızca geri yazmada kullanılır.
+EDIT_PROMPT = ("Erase only the lettering and sound effect characters. "
                "Do not remove or alter any other lines or marks in the artwork.")
 
-# Redraw girdi kipi (inpaint/mod.rs InputPrep): varsayılan green; karo karo (çekirdek <= 512 + 128 bağlam), ölçeksiz.
-PAGE = {"input_mode": "green", "prompt": EDIT_PROMPT,
-        "prompt_green": "Remove the green areas and restore the artwork underneath, matching the surrounding lines and screentone. Do not add any text.",
-        "prompt_lama_prefill": "Clean manga artwork. Keep everything as is; fix smudges and continue lines and screentone naturally. No text."}
+# Redraw modelleri hep MangaTranslator bölge yolundan geçer (mtcrop.rs): bölge başına ham kırpıntı (yeşil boya yok, maske modele verilmez),
+# ~1 MP'ye büyütülür, çıktı geri küçülür; boyutlar `multiple`'ın katı (Klein: 16).
+PAGE = {"multiple": 16, "prompt": EDIT_PROMPT}
 
 # ---- LaMa: NVIDIA'da PyTorch (GPU), diğerlerinde ONNX (CPU). Makine yalnızca kendi dosyasını indirir ("only"). ----
 add(id="lama-manga", name="LaMa Manga", backend="lama", kind="inpaint", adapter="lama01", recommended=True,
@@ -63,7 +63,7 @@ add(id="lama-big", name="LaMa Genel", backend="lama", kind="inpaint", adapter="l
            hf_file("fashn-ai/LaMa", "big-lama.pt", "torch", only="cuda")])
 
 # ---- sd.cpp çalışma ortamları (kullanıcıdan gizli; donanıma göre otomatik) ----
-# Sabit sürüm: test edilen derleme (Qwen-Image 2.1 için --sigmas önayarı bu sürümde var). Güncellemek için etiketi değiştirip yeniden test edin.
+# Sabit sürüm: test edilen derleme Güncellemek için etiketi değiştirip yeniden test edin.
 SDCPP_TAG = "master-1063-3d315c4"
 rel = get("https://api.github.com/repos/leejet/stable-diffusion.cpp/releases/tags/" + SDCPP_TAG)
 tag = rel["tag_name"]
@@ -96,7 +96,7 @@ add(id="tool-sdnq-env", name="Python ortamı", backend="tool", kind="runtime", v
 add(id="sdcpp-flux2-klein-4b", name="FLUX.2 Klein 4B", backend="sdcpp", kind="redraw", mode="edit", recommended=True,
     description="Desenli ve karmaşık arka planı yeniden çizerek yazıyı siler. Her ekran kartında çalışır.", description_en="Erases the text by redrawing patterned and complex backgrounds. Works on any graphics card.",
     license="Apache-2.0", license_url="https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF", min_vram_gb=6, min_ram_gb=16,
-    params={"steps": 4, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "quant": "GGUF Q4_K_M", **PAGE},
+    params={"steps": 4, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "vae_tile": 512, "quant": "GGUF Q4_K_M", **PAGE},
     files=[hf_file("unsloth/FLUX.2-klein-4B-GGUF", "flux-2-klein-4b-Q4_K_M.gguf", "diffusion"),
            hf_file("unsloth/Qwen3-4B-GGUF", "Qwen3-4B-UD-Q4_K_XL.gguf", "llm"),
            hf_file("Comfy-Org/flux2-dev", "split_files/vae/flux2-vae.safetensors", "vae")])
@@ -105,33 +105,6 @@ add(id="sdnq-flux2-klein-4b", name="FLUX.2 Klein 4B (NVIDIA)", backend="sdnq", k
     description="Aynı model, NVIDIA kartlar için; ince ayrıntıda daha iyi olabilir.", description_en="Same model, for NVIDIA cards; may be better on fine detail.",
     license="Apache-2.0", license_url="https://huggingface.co/" + repo, min_vram_gb=6, min_ram_gb=16, hf_repo=repo,
     params={"pipeline": "Flux2KleinPipeline", "steps": 4, "guidance": 1.0, "quant": "4-bit dinamik", **PAGE},
-    files=hf_repo_all(repo))
-
-# ---- Qwen-Image 2.1 Turbo (MangaTranslator core/ml/model_manager.py + utils/model_metadata.py ile aynı dosyalar):
-# 8 adım sabit sigma çizelgesi ("--sigmas qwen-image-2.1-turbo"), cfg 1, euler; metin kodlayıcı Qwen3-VL-8B (+ mmproj), 32'nin katı çözünürlük. ----
-# MangaTranslator yolu (inpaint/mod.rs `is_mt`, mtcrop.rs): bölge başına ham kırpıntı (yeşil boya yok, maske modele verilmez),
-# komut = MT'nin sabit komutu, kırpıntı ~1 MP'ye büyütülür, çıktı geri küçülür.
-QWEN = {"steps": 8, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "sigmas": "qwen-image-2.1-turbo", "multiple": 32,
-        **PAGE, "input_mode": "raw", "mt_crop": True}
-add(id="sdcpp-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo", backend="sdcpp", kind="redraw", mode="edit",
-    description="Qwen-Image 2.1 Turbo ile yazı yerini çevresine uygun yeniden çizer; Klein'dan ağır ve yavaş.", description_en="Redraws the text area to match its surroundings with Qwen-Image 2.1 Turbo; heavier and slower than Klein.",
-    license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
-    min_vram_gb=12, min_ram_gb=24, notes="Qwen3-VL-8B metin kodlayıcı; 8 adım sabit. 16 GB+ NVIDIA'da INT8 takımı (RTX 4060 Ti 16 GB: sayfa başına ~25 sn), altında Q4_K_M takımı (~45 sn); en çok ~15 GB VRAM.",
-    params={**QWEN, "quant": "GGUF Q4_K_M"},
-    # 16 GB+ NVIDIA: "fast" takımı (INT8 convrot yayılım + dbcache; IQ3 kodlayıcı sonuçta bozulma yaptığı için kullanılmadı); diğer makineler ve eski Q4 kurulumları: "compact" takımı.
-    # Seçim Catalog::load -> ModelSpec::resolve_tier içinde; kullanıcı seçim yapmaz.
-    fast_params={"quant": "INT8 convrot", "cache_mode": "dbcache"},
-    files=[hf_file("unsloth/Qwen-Image-2.1-Turbo-GGUF", "qwen-image-2.1-turbo-Q4_K_M.gguf", "diffusion", only="compact"),
-           hf_file("Comfy-Org/Qwen-Image-2.1", "diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "diffusion", only="fast"),
-           hf_file("unsloth/Qwen3-VL-8B-Instruct-GGUF", "Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf", "llm"),
-           hf_file("unsloth/Qwen3-VL-8B-Instruct-GGUF", "mmproj-F16.gguf", "llm_vision", name="Qwen3-VL-8B-Instruct-mmproj-F16.gguf"),
-           hf_file("unsloth/Qwen-Image-2.1-FP8", "vae/qwen_image_2.1_vae_bf16.safetensors", "vae")])
-repo = "SamuelTallet/Qwen-Image-2.1-Turbo-SDNQ-4bit-dynamic-hadamard256"  # MangaTranslator'ın SDNQ deposu (texture-fix VAE dahil)
-add(id="sdnq-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo (NVIDIA)", backend="sdnq", kind="redraw", mode="edit",
-    description="Aynı model, NVIDIA kartlar için 4-bit SDNQ sürümü; daha az VRAM kullanır.", description_en="Same model, 4-bit SDNQ build for NVIDIA cards; uses less VRAM.",
-    license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
-    min_vram_gb=10, min_ram_gb=24, hf_repo=repo, notes="Qwen3-VL-8B metin kodlayıcı dahil; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~70 sn, en çok ~10,5 GB VRAM.",
-    params={"pipeline": "QwenImage21Pipeline", "steps": 8, "multiple": 32, "quant": "4-bit dinamik · Hadamard", **PAGE, "input_mode": "raw", "mt_crop": True},
     files=hf_repo_all(repo))
 
 json.dump({"version": 2, "sdcpp_tag": tag, "models": models}, sys.stdout, indent=1, ensure_ascii=False)

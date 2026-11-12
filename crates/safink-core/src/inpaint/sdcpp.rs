@@ -17,13 +17,18 @@ pub struct SdCppInpainter {
     spec: ModelSpec,
     model_paths: Vec<(String, PathBuf)>,
     counter: u32,
-    prep: super::InputPrep,
+    prompt: String,
     /// sd-server kullanılabilir (kurulu, açık ve başlatma başarısız olmadı).
     use_server: bool,
     low_vram: bool,
 }
 
 const SEED: i64 = 1;
+
+/// Tohum; geliştirme için `SAFINK_SEED` ile değiştirilebilir.
+fn seed() -> i64 {
+    std::env::var("SAFINK_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(SEED)
+}
 
 /// sd.cpp komut satırı yürütülebilir adı.
 pub const SDCLI: &str = if cfg!(windows) { "sd-cli.exe" } else { "sd-cli" };
@@ -65,9 +70,9 @@ impl SdCppInpainter {
         let workdir = paths.work().join("sdcpp");
         std::fs::create_dir_all(&workdir)?;
         let model_paths = spec.active_files().into_iter().map(|f| (f.role.clone(), spec.dir(paths).join(&f.name))).collect();
-        let prep = super::InputPrep::new(paths, spec, settings)?;
+        let prompt = super::prompt_of(spec);
         let use_server = super::sdserver::enabled() && super::sdserver::server_exe(&exe).is_some();
-        let mut me = Self { exe, workdir, spec: spec.clone(), model_paths, counter: 0, prep, use_server, low_vram: settings.low_vram };
+        let mut me = Self { exe, workdir, spec: spec.clone(), model_paths, counter: 0, prompt, use_server, low_vram: settings.low_vram };
         if me.use_server {
             if let Err(e) = me.server_port(cancel, progress) {
                 if cancel.load(Ordering::Relaxed) {
@@ -90,7 +95,6 @@ impl SdCppInpainter {
                 "clip_l" => "--clip_l",
                 "t5xxl" => "--t5xxl",
                 "llm" => "--llm",
-                "llm_vision" => "--llm_vision",
                 _ => continue,
             };
             a.push(flag.into());
@@ -111,9 +115,6 @@ impl SdCppInpainter {
         if self.spec.params.get("guidance").is_some() {
             p("--guidance", self.pf("guidance", 3.5).to_string());
         }
-        if let Some(sig) = self.spec.params.get("sigmas").and_then(|v| v.as_str()) {
-            p("--sigmas", sig.to_string()); // sabit adım çizelgesi (Qwen-Image 2.1 Turbo: "qwen-image-2.1-turbo")
-        }
         p("--sampling-method", self.ps("sampler", "euler"));
         // adım önbelleği (örn. "dbcache": 8 adımda ~%20 hız, görüntü farkı ihmal edilebilir); eşik isteğe bağlı
         if let Some(mode) = self.spec.params.get("cache_mode").and_then(|v| v.as_str()) {
@@ -126,9 +127,8 @@ impl SdCppInpainter {
         if self.spec.params.get("offload").and_then(|v| v.as_bool()).unwrap_or(true) && (self.low_vram || crate::catalog::hardware().vram_gb < 23.5) {
             a.push("--offload-to-cpu".into());
         }
-        // Düşük VRAM: döşemeli VAE (kodlama+çözme). Döşeme boyutu modele göre ölçüldü: Qwen'de varsayılan 256 sayfada gri leke
-        // üretti, 384 temiz ve çıktı tepe belleği ~3 GB düşük; metin kodlayıcıyı/VAE'yi CPU'ya almak (--backend te=cpu / vae=cpu)
-        // Qwen'de 80 sn / Klein'da 5 dk ekledi, bu yüzden kullanılmaz.
+        // Düşük VRAM: döşemeli VAE (kodlama+çözme). Metin kodlayıcıyı/VAE'yi CPU'ya almak (--backend te=cpu / vae=cpu)
+        // Klein'da 5 dk ekledi, bu yüzden kullanılmaz.
         if self.low_vram {
             a.push("--vae-tiling".into());
             a.push("--vae-tile-size".into());
@@ -158,7 +158,7 @@ impl SdCppInpainter {
         let (w, h) = padded.dimensions();
         let mut last: Option<anyhow::Error> = None;
         for attempt in 0..2 {
-            let r = self.server_port(ctx.cancel, &|_| {}).and_then(|port| super::sdserver::img_gen(port, &self.prep.prompt, w, h, SEED, &png, ctx.cancel));
+            let r = self.server_port(ctx.cancel, &|_| {}).and_then(|port| super::sdserver::img_gen(port, &self.prompt, w, h, seed(), &png, ctx.cancel));
             match r {
                 Ok(bytes) => return Ok(Some(image::load_from_memory(&bytes)?.to_rgb8())),
                 Err(e) => {
@@ -182,30 +182,21 @@ impl SdCppInpainter {
 
 impl Inpainter for SdCppInpainter {
     fn label(&self) -> String { format!("sd.cpp · {}", self.spec.name) }
-    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, mt_regions: super::is_mt(&self.spec.params), ..TileSpec::DEFAULT } }
+    fn tile_spec(&self) -> TileSpec { TileSpec::redraw(super::multiple_of(&self.spec.params)) }
 
-    fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
+    /// MangaTranslator yolu: ham kırpıntı (maske modele verilmez; yalnızca geri yazmada kullanılır) ~1 MP'ye büyütülür,
+    /// model o boyutta çalışır, çıktı kırpıntı boyutuna geri küçülür.
+    fn inpaint(&mut self, img: &RgbImage, _mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         self.counter += 1;
         let (w0, h0) = img.dimensions();
-        let prepared = self.prep.prepare(img, mask, ctx)?;
-        // MangaTranslator yolu (Qwen): kırpıntı ~1 MP'ye büyütülür, model o boyutta çalışır, çıktı kırpıntı boyutuna geri küçülür.
-        if super::is_mt(&self.spec.params) {
-            let mult = self.spec.params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(32) as u32;
-            let (sw, sh) = crate::mtcrop::inference_size(w0, h0, mult);
-            let up = crate::mtcrop::scale_to(&prepared, sw, sh);
-            let out = if let Some(o) = self.try_server(&up, ctx)? { o } else { self.run_cli(&up, sw, sh, ctx)? };
-            if out.dimensions() != (sw, sh) {
-                bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), sw, sh));
-            }
-            return Ok(crate::mtcrop::scale_to(&out, w0, h0));
+        let mult = super::multiple_of(&self.spec.params);
+        let (sw, sh) = crate::mtcrop::inference_size(w0, h0, mult);
+        let up = crate::mtcrop::scale_to(img, sw, sh);
+        let out = if let Some(o) = self.try_server(&up, ctx)? { o } else { self.run_cli(&up, sw, sh, ctx)? };
+        if out.dimensions() != (sw, sh) {
+            bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), sw, sh));
         }
-        let padded = super::pad_for(&prepared, &self.spec.params);
-        let (w, h) = padded.dimensions();
-        if let Some(out) = self.try_server(&padded, ctx)? {
-            return super::crop_to(out, w0, h0, (w, h));
-        }
-        let out = self.run_cli(&padded, w, h, ctx)?;
-        super::crop_to(out, w0, h0, (w, h))
+        Ok(crate::mtcrop::scale_to(&out, w0, h0))
     }
 }
 
@@ -220,9 +211,9 @@ impl SdCppInpainter {
         lib_path_env(&mut cmd, &self.exe);
         cmd.args(self.model_args());
         cmd.args(self.gen_args());
-        let prompt = self.prep.prompt.clone();
+        let prompt = self.prompt.clone();
         cmd.arg("-p").arg(&prompt).arg("-W").arg(w.to_string()).arg("-H").arg(h.to_string());
-        cmd.arg("--seed").arg(SEED.to_string());
+        cmd.arg("--seed").arg(seed().to_string());
         // MangaTranslator gibi: kırpıntı referans görüntü (-r) + sabit komut; maske yalnızca geri yazmada kullanılır.
         cmd.arg("-r").arg(&inp);
         cmd.arg("-o").arg(&outp);

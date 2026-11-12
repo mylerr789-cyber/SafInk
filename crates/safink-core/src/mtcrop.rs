@@ -1,5 +1,5 @@
 //! MangaTranslator (core/image/inpainting.py `_CropInpainter.inpaint_mask`) kırpıntı geometrisi ve ölçek kuralları.
-//! Qwen-Image 2.1 Turbo yolu: bölge = maskenin 8-bağlantılı bir bileşeni; kırpıntı = bileşen kutusu + bağlam, 32'nin katına
+//! FLUX.2 Klein yolu (MangaTranslator): bölge = maskenin 8-bağlantılı bir bileşeni; kırpıntı = bileşen kutusu + bağlam, `multiple`'ın katına
 //! aşağı yuvarlanmış, sayfa içinde tutulmuş; model ~1 MP'ye büyütülmüş kırpıntıda çalışır, çıktı kırpıntı boyutuna geri küçülür.
 use image::RgbImage;
 
@@ -88,7 +88,7 @@ pub fn plan_crop(bbox: [u32; 4], img_w: u32, img_h: u32, multiple: u32) -> Optio
     Some(CropPlan { x: x1 as u32, y: y1 as u32, w: width as u32, h: height as u32, padding: padding as u32, blur_radius: blur as u32 })
 }
 
-/// MT `_prepare_image_for_inference` (upscale_small_crops = açık): ~1 MP, en-boy korunur, her kenar ≤ 2048, 32'nin katı, ≤ 4 MP.
+/// MT `_prepare_image_for_inference` (upscale_small_crops = açık): ~1 MP, en-boy korunur, her kenar ≤ 2048, `multiple`'ın katı (Klein 16), ≤ 4 MP.
 pub fn inference_size(w: u32, h: u32, multiple: u32) -> (u32, u32) {
     let m = multiple.max(1) as i64;
     let (ow, oh) = (w as i64, h as i64);

@@ -1,4 +1,4 @@
-//! Difüzyon (Flux/Qwen) kırpıntı çıktısı son işlemi: MangaTranslator'ın (meangrinch, commit 047d381) ışıklılık eşleme,
+//! Difüzyon (Flux/Klein) kırpıntı çıktısı son işlemi: MangaTranslator'ın (meangrinch, commit 047d381) ışıklılık eşleme,
 //! "sanatı koru" glif kompoziti ve ton eşlemesinin Rust karşılığı. Sabitler ve adımlar kaynakla aynıdır; kaynak satırları yorumlardadır.
 //! Fark: MT glif olasılık modeliyle (SAM-TS) glifleri bulur; burada model yok, glifler bileşenin çevresindeki zeminden
 //! ayrılan "mürekkep" pikselleridir (`INK_DEVIATION`). LaMa çıktısına bu adımlar uygulanmaz (MT de uygulamaz).
@@ -153,12 +153,16 @@ pub fn match_luminance(orig: &RgbImage, gen: &RgbImage, mask: &GrayImage) -> Rgb
     if !reference.iter().any(|&v| v) {
         return gen.clone();
     }
+    // MT kayması bölge kutusunun tamamına uygular (kutu = metinden büyük, korunan sanatı da içerir); burada bölge sıkı bir metin
+    // maskesidir. Maskenin 12 px şeridi de kaydırılır ki glif kompoziti (bkz. `composite_glyphs`) şeritteki düz zemin
+    // pikselleriyle kaymayı ölçüp düzeltebilsin. Şerit pikselleri sayfaya yazılmaz.
+    let apply: Vec<bool> = dil.iter().zip(&mb).map(|(&d, &m)| d || m).collect();
     let ol: Vec<[f32; 3]> = orig.pixels().map(|p| rgb_to_lab8(p.0)).collect();
     let mut gl: Vec<[f32; 3]> = gen.pixels().map(|p| rgb_to_lab8(p.0)).collect();
     let sel = |v: &Vec<[f32; 3]>, c: usize| mean_where(v.iter().zip(&reference).filter(|(_, &r)| r).map(move |(p, _)| p[c]));
     let l_shift = sel(&ol, 0) - sel(&gl, 0);
     if l_shift.abs() >= 1.0 {
-        for (p, &m) in gl.iter_mut().zip(&mb) {
+        for (p, &m) in gl.iter_mut().zip(&apply) {
             if m {
                 p[0] = (p[0] + l_shift).clamp(0.0, 255.0);
             }
@@ -167,7 +171,7 @@ pub fn match_luminance(orig: &RgbImage, gen: &RgbImage, mask: &GrayImage) -> Rgb
     let a_dev = mean_where(ol.iter().zip(&reference).filter(|(_, &r)| r).map(|(p, _)| (p[1] - 128.0).abs()));
     let b_dev = mean_where(ol.iter().zip(&reference).filter(|(_, &r)| r).map(|(p, _)| (p[2] - 128.0).abs()));
     if a_dev < 3.0 && b_dev < 3.0 {
-        for (p, &m) in gl.iter_mut().zip(&mb) {
+        for (p, &m) in gl.iter_mut().zip(&apply) {
             if m {
                 p[1] = 128.0;
                 p[2] = 128.0;
@@ -177,7 +181,7 @@ pub fn match_luminance(orig: &RgbImage, gen: &RgbImage, mask: &GrayImage) -> Rgb
         for c in 1..3 {
             let shift = sel(&ol, c) - sel(&gl, c);
             if shift.abs() > 1.0 {
-                for (p, &m) in gl.iter_mut().zip(&mb) {
+                for (p, &m) in gl.iter_mut().zip(&apply) {
                     if m {
                         p[c] = (p[c] + shift).clamp(0.0, 255.0);
                     }
@@ -186,8 +190,8 @@ pub fn match_luminance(orig: &RgbImage, gen: &RgbImage, mask: &GrayImage) -> Rgb
         }
     }
     let mut out = gen.clone();
-    for ((o, p), &m) in out.pixels_mut().zip(&gl).zip(&mb) {
-        // MT: gen_lab.astype(np.uint8) (kesme); yalnızca maske pikselleri kullanılır, ötekiler olduğu gibi kalır
+    for ((o, p), &m) in out.pixels_mut().zip(&gl).zip(&apply) {
+        // MT: gen_lab.astype(np.uint8) (kesme); maske + şerit dışındaki pikseller olduğu gibi kalır
         if m {
             o.0 = lab8_to_rgb([p[0] as u8, p[1] as u8, p[2] as u8]);
         }
@@ -439,20 +443,31 @@ pub fn composite_glyphs(before: &RgbImage, after: &RgbImage, crop_mask: &GrayIma
             let i = at(k % bw, k / bw);
             [before.as_raw()[i * 3], before.as_raw()[i * 3 + 1], before.as_raw()[i * 3 + 2]]
         }).collect();
-        let a_crop: Vec<[u8; 3]> = (0..bw * bh).map(|k| {
-            let i = at(k % bw, k / bw);
-            [after.as_raw()[i * 3], after.as_raw()[i * 3 + 1], after.as_raw()[i * 3 + 2]]
-        }).collect();
         let all_glyph = (0..bw * bh).all(|k| glyphs[k] == region[k]);
-        let (alpha, redraw): (Vec<f32>, Vec<[f32; 3]>) = if all_glyph {
-            (region.iter().map(|&r| if r { 1.0 } else { 0.0 }).collect(), a_crop.iter().map(|p| p.map(|v| v as f32)).collect())
+        // Ton eşleme örnekleri (MT `composite_glyphs`: `region & ~glyphs`, yani kutunun korunan sanatı). MT'nin bölgesi metinden büyük
+        // bir kutudur; buradaki bölge sıkı bir metin maskesi olduğundan çoğu piksel glif sayılır ve örnek kalmaz: ışıklılık kayması
+        // (bkz. `match_luminance`) düzeltilmeden sayfaya geçer ve balondaki / rozetteki "hayalet" olur. Bu yüzden maskenin hemen
+        // dışındaki `BOUNDARY_WIDTH` şeridi (yazı dışı, bekleyen maske dışı, aynı düz-ve-uyumlu süzgeçten geçen pikseller) de örnektir.
+        let mut samples = vec![false; w * h];
+        for i in 0..w * h {
+            samples[i] = dil[i] && !cm[i];
+        }
+        for k in 0..bw * bh {
+            if region[k] && !glyphs[k] {
+                samples[at(k % bw, k / bw)] = true;
+            }
+        }
+        let b_full: Vec<[u8; 3]> = before.as_raw().chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let a_full: Vec<[u8; 3]> = after.as_raw().chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+        let tone = match_tone(&b_full, &a_full, &samples, w, h, TONE_SIGMA_RADII * radius as f32);
+        let redraw: Vec<[f32; 3]> = (0..bw * bh).map(|k| tone[at(k % bw, k / bw)]).collect();
+        let alpha: Vec<f32> = if all_glyph {
+            region.iter().map(|&r| if r { 1.0 } else { 0.0 }).collect()
         } else {
             // korunan sanata uzaklık (kutu kenarında kesilen glifler tam çizilmiş kalır): sıfırlar = bölge & !glif
             let zeros: Vec<bool> = (0..bw * bh).map(|k| region[k] && !glyphs[k]).collect();
             let inside = edt(&zeros, bw, bh);
-            let alpha = (0..bw * bh).map(|k| if glyphs[k] { (inside[k] / feather).clamp(0.0, 1.0) } else { 0.0 }).collect();
-            let samples = zeros;
-            (alpha, match_tone(&b_crop, &a_crop, &samples, bw, bh, TONE_SIGMA_RADII * radius as f32))
+            (0..bw * bh).map(|k| if glyphs[k] { (inside[k] / feather).clamp(0.0, 1.0) } else { 0.0 }).collect()
         };
         for k in 0..bw * bh {
             if !region[k] {
@@ -552,5 +567,33 @@ mod tests {
         assert!(out.get_pixel(30, 22)[0] >= 215, "yazı silinmeli");
         assert_eq!(*out.get_pixel(150, 90), Rgb([185, 185, 185]), "uzak sanat korunmalı");
         assert_eq!(out.get_pixel(5, 5), before.get_pixel(5, 5));
+    }
+
+    #[test]
+    fn tight_text_mask_in_white_balloon_leaves_no_grey_ghost() {
+        // beyaz balon + yazı; maskenin 12 px şeridinde balon çizgisi var (ışıklılık kaymasını eksiye çeker); model tertemiz beyaz çizer
+        let mut before = RgbImage::from_pixel(120, 80, Rgb([255, 255, 255]));
+        for y in 0..80 {
+            for x in 0..6 {
+                before.put_pixel(x, y, Rgb([0, 0, 0]));
+            }
+        }
+        let mut mask = GrayImage::new(120, 80);
+        let mut own = vec![false; 120 * 80];
+        let mut labels = vec![0u32; 120 * 80];
+        for y in 30usize..50 {
+            for x in 14usize..100 {
+                before.put_pixel(x as u32, y as u32, Rgb([0, 0, 0]));
+                mask.put_pixel(x as u32, y as u32, image::Luma([255]));
+                own[y * 120 + x] = true;
+                labels[y * 120 + x] = 1;
+            }
+        }
+        let gen = RgbImage::from_pixel(120, 80, Rgb([255, 255, 255]));
+        let lum = match_luminance(&before, &gen, &mask);
+        assert!(lum.get_pixel(50, 40)[0] < 252, "ön koşul: kayma balonu grileştirir");
+        let out = composite_glyphs(&before, &lum, &mask, &own, &labels, 9);
+        let p = out.get_pixel(50, 40);
+        assert!(p[0] >= 253, "hayalet kalmamalı: {p:?}");
     }
 }

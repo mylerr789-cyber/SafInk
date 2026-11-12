@@ -43,6 +43,5 @@ SafInk MIT lisanslıdır. Modeller uygulamayla gelmez, kendi kaynaklarından ind
 [LaMa Manga](https://huggingface.co/mayocream/lama-manga) (MIT),
 [LaMa](https://github.com/advimman/lama) (Apache-2.0),
 [FLUX.2 Klein 4B](https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF) (Apache-2.0),
-[Qwen-Image 2.1 Turbo](https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE) (Qwen Research Lisansı, ticari kullanım yok) ve Qwen3-VL-8B (Apache-2.0),
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (MIT),
 [SDNQ](https://github.com/Disty0/sdnq).

@@ -13,20 +13,23 @@ use anyhow::{bail, Result};
 use image::{GrayImage, RgbImage};
 use std::sync::atomic::AtomicBool;
 
-/// Koharu gibi karo planı: maske bileşenleri çekirdekleri `core` px'i aşmayan karolara gruplanır, her karo çekirdek + `context` px
-/// bağlamla yerel çözünürlükte (ölçekleme yok) modele gider. `postprocess`: difüzyon çıktısına MangaTranslator son işlemi
-/// (ışıklılık eşleme + glif kompoziti + ton eşleme) uygulanır; LaMa çıktısı sert yapıştırılır.
-/// `mt_regions`: Koharu karoları yerine MangaTranslator bölge yolu (Qwen): bileşen başına kırpıntı, ~1 MP ölçek, bkz. `mtcrop`.
+/// Karo planı. LaMa (Koharu gibi): maske bileşenleri çekirdekleri `core` px'i aşmayan karolara gruplanır, her karo çekirdek + `context`
+/// px bağlamla yerel çözünürlükte (ölçekleme yok) modele gider, çıktı yalnızca maskeli piksellerde yazılır.
+/// `mt_regions`: redraw (difüzyon) modelleri karo yerine MangaTranslator bölge yolunu kullanır (bileşen başına kırpıntı, ~1 MP ölçek,
+/// hizalama + ışıklılık eşleme + glif kompoziti; bkz. `mtcrop`, `pipeline::clean_regions_mt`). `multiple`: bölge yolunda
+/// kırpıntı/çıkarım boyutlarının katı (katalog `params.multiple`; Klein 16).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TileSpec {
     pub core: u32,
     pub context: u32,
-    pub postprocess: bool,
     pub mt_regions: bool,
+    pub multiple: u32,
 }
 
 impl TileSpec {
-    pub const DEFAULT: TileSpec = TileSpec { core: 512, context: 128, postprocess: false, mt_regions: false };
+    pub const DEFAULT: TileSpec = TileSpec { core: 512, context: 128, mt_regions: false, multiple: 16 };
+    /// Redraw (difüzyon) modelleri: yalnızca MangaTranslator bölge yolu.
+    pub fn redraw(multiple: u32) -> TileSpec { TileSpec { mt_regions: true, multiple, ..TileSpec::DEFAULT } }
 }
 
 pub struct Ctx<'a> {
@@ -72,17 +75,6 @@ pub fn pad_rgb(img: &RgbImage, w: u32, h: u32) -> RgbImage {
     }
     out
 }
-/// Boyutları 16'nın katına kenar çoğaltarak tamamlar (ölçekleme yok); sonucu `crop_to` ile özgün boyuta kırpın.
-pub fn pad16(img: &RgbImage) -> RgbImage {
-    let r = |v: u32| ((v + 15) / 16 * 16).max(64);
-    pad_rgb(img, r(img.width()), r(img.height()))
-}
-/// Dolgu katı katalog `params.multiple` (varsayılan 16; Qwen-Image 2.1 için 32).
-pub fn pad_for(img: &RgbImage, params: &serde_json::Value) -> RgbImage {
-    let m = params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(16).max(1) as u32;
-    let r = |v: u32| ((v + m - 1) / m * m).max(64);
-    pad_rgb(img, r(img.width()), r(img.height()))
-}
 /// Model çıktısını dolgusuz özgün boyuta kırpar; beklenmeyen boyutta hata (ölçekleme yapılmaz).
 pub fn crop_to(out: RgbImage, w: u32, h: u32, padded: (u32, u32)) -> Result<RgbImage> {
     if out.dimensions() != padded {
@@ -100,103 +92,15 @@ pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
     out
 }
 
-/// Katalog `params.mt_crop`: MangaTranslator bölge yolu (ham kırpıntı + ~1 MP ölçek, bkz. `mtcrop`).
-pub fn is_mt(params: &serde_json::Value) -> bool {
-    params.get("mt_crop").and_then(|v| v.as_bool()).unwrap_or(false)
+/// Katalog `params.multiple` (varsayılan 16).
+pub fn multiple_of(params: &serde_json::Value) -> u32 {
+    params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(16).max(1) as u32
 }
 
-/// Redraw modellerinin girdi hazırlığı (katalog `params.input_mode`):
-/// - `original`: sayfa olduğu gibi gider (maske modele verilmez),
-/// - `raw`: `original` ile aynı (ham kırpıntı, yeşil yok); MangaTranslator komutu `prompt` ile gelir (Qwen),
-/// - `green`: maskeli (genişletilmiş) pikseller saf #00FF00 boyanır, komut "yeşil alanları kaldır" der,
-/// - `lama_prefill`: maske önce LaMa ile doldurulur (karo karo), Flux yalnızca düzeltir.
-/// Karo çıktıları yalnızca maskeli piksellerde sayfaya yazılır. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
-/// ortam değişkenleri katalog değerinin üstüne yazar.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InputMode {
-    Original,
-    Raw,
-    Green,
-    LamaPrefill,
-}
-
-pub struct InputPrep {
-    pub mode: InputMode,
-    pub prompt: String,
-    lama: Option<Box<dyn Inpainter>>,
-}
-
-impl InputPrep {
-    pub fn new(paths: &AppPaths, spec: &ModelSpec, settings: &Settings) -> Result<Self> {
-        let ps = |k: &str| spec.params.get(k).and_then(|v| v.as_str()).map(str::to_string);
-        let mode_name = std::env::var("SAFINK_INPUT_MODE").ok().or_else(|| ps("input_mode")).unwrap_or_else(|| "original".into());
-        let mode = match mode_name.as_str() {
-            "original" => InputMode::Original,
-            "raw" => InputMode::Raw,
-            "green" => InputMode::Green,
-            "lama_prefill" => InputMode::LamaPrefill,
-            m => bail!("bilinmeyen input_mode: {m}"),
-        };
-        let key = match mode {
-            InputMode::Original | InputMode::Raw => "prompt",
-            InputMode::Green => "prompt_green",
-            InputMode::LamaPrefill => "prompt_lama_prefill",
-        };
-        let prompt = std::env::var("SAFINK_PROMPT").ok().or_else(|| ps(key)).or_else(|| ps("prompt")).unwrap_or_else(|| "Remove all text.".into());
-        let lama = if mode == InputMode::LamaPrefill {
-            let cat = crate::catalog::Catalog::load(paths, settings.low_vram);
-            let lspec = cat.get("lama-manga").ok_or_else(|| anyhow::anyhow!("lama-manga kataloğda yok"))?.clone();
-            Some(create(paths, &lspec, settings)?)
-        } else {
-            None
-        };
-        Ok(Self { mode, prompt, lama })
-    }
-
-    /// Modele gidecek görüntü (kırpıntı boyutunda; dolgu çağıranda yapılır).
-    pub fn prepare(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
-        match self.mode {
-            InputMode::Original | InputMode::Raw => Ok(img.clone()),
-            InputMode::Green => {
-                let mut o = img.clone();
-                for (x, y, m) in mask.enumerate_pixels() {
-                    if m[0] >= 128 {
-                        o.put_pixel(x, y, image::Rgb([0, 255, 0]));
-                    }
-                }
-                Ok(o)
-            }
-            InputMode::LamaPrefill => {
-                let lama = self.lama.as_mut().expect("lama_prefill için LaMa yüklü");
-                // maske zaten genişletilmiş; LaMa sonucu tüysüz tam doldurma olarak alınır
-                crate::pipeline::clean_image(img, mask, &crate::pipeline::CleanParams { dilation: 0, feather: 0, flat_fill: false }, None, lama.as_mut(), ctx.cancel, &|_, _| {})
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use image::Rgb;
-
-    #[test]
-    fn raw_input_mode_sends_the_original_crop_without_green() {
-        let mut img = RgbImage::from_pixel(64, 64, Rgb([200, 190, 180]));
-        img.put_pixel(10, 10, Rgb([0, 0, 0]));
-        let mut mask = GrayImage::new(64, 64);
-        for y in 5..20 {
-            for x in 5..20 {
-                mask.put_pixel(x, y, image::Luma([255]));
-            }
-        }
-        let mut prep = InputPrep { mode: InputMode::Raw, prompt: String::new(), lama: None };
-        let cancel = AtomicBool::new(false);
-        let out = prep.prepare(&img, &mask, &Ctx { cancel: &cancel }).unwrap();
-        assert_eq!(out.as_raw(), img.as_raw());
-        assert!(out.pixels().all(|p| *p != Rgb([0, 255, 0])));
-        // karşılaştırma: green kipi maskeli pikselleri boyar
-        let mut g = InputPrep { mode: InputMode::Green, prompt: String::new(), lama: None };
-        assert_eq!(g.prepare(&img, &mask, &Ctx { cancel: &cancel }).unwrap().get_pixel(10, 10), &Rgb([0, 255, 0]));
-    }
+/// Redraw modelinin komutu: katalog `params.prompt` (MangaTranslator komutu). Geliştirme için `SAFINK_PROMPT` ortam değişkeni üstüne yazar.
+pub fn prompt_of(spec: &ModelSpec) -> String {
+    std::env::var("SAFINK_PROMPT")
+        .ok()
+        .or_else(|| spec.params.get("prompt").and_then(|v| v.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "Remove all text.".into())
 }

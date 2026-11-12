@@ -5,11 +5,14 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
-## [0.6.1] - 2026-11-11
+## [0.6.1] - 2026-11-12
 
-- Qwen ile temizlenen yerlerin birkaç piksel kayık yapıştırılması düzeltildi: karo, Qwen'in beklediği boyuta büyütülüp gönderiliyor ve çıktı yapıştırılmadan önce çevresine göre hizalanıyor.
+- Qwen-Image 2.1 Turbo kaldırıldı: 0.6.0'da sonuçları kayık ve lekeliydi. İndirilmiş Qwen dosyaları diskte kalır, Modeller sekmesinde artık görünmez.
+- FLUX.2 Klein artık MangaTranslator'ın kullandığı yolla çalışıyor: yazının üstüne yeşil boya sürülmüyor; her yazı bölgesi çevresiyle birlikte kırpılıp yazısıyla birlikte modele gidiyor, ~1 MP'ye büyütülüp geri küçültülüyor, sonuç yalnızca maskeli piksellere yazılıyor. Çizgiler kaymıyor, ara tonlu ve çizimli zeminlerde sonuç çok daha temiz.
+- Beyaz balonlarda kalan silik gri yazı izi ve koyu zeminlerdeki yazı biçimli lekeler düzeltildi.
+- Not: Klein artık her yazı bölgesini ayrı işlediği için çok yazılı sayfalar daha uzun sürüyor (RTX 4060 Ti'de bölge başına ~11 sn).
 
-*English:* Fixed Qwen results being pasted a few pixels off: tiles are sent at the size Qwen expects and the output is aligned to its surroundings before pasting.
+*English:* Removed Qwen-Image 2.1 Turbo (its 0.6.0 results were shifted and blotchy). FLUX.2 Klein now follows MangaTranslator: no green paint, each text region is cropped with context and sent with its text, scaled to ~1 MP and back, and only masked pixels are written — no shifted lines, much cleaner results on screentone and art. Fixed faint grey text ghosts in white balloons and text-shaped blotches on dark backgrounds. Pages with many text regions take longer (~11 s per region on an RTX 4060 Ti).
 
 ## [0.6.0] - 2026-11-11
 

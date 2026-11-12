@@ -1,5 +1,5 @@
 //! Sayfa temizleme hattı (Koharu gibi): genişlet -> (düz zemin doldur) -> kalan maske bileşenleri karolara bölünür; her karo yerel
-//! çözünürlükte (çekirdek <= 512, + 128 px bağlam) modele gider ve yalnızca maskeli pikseller sayfaya yazılır (LaMa, Flux, Qwen aynı yol).
+//! çözünürlükte (çekirdek <= 512, + 128 px bağlam) modele gider ve yalnızca maskeli pikseller sayfaya yazılır (LaMa, Flux aynı yol).
 use crate::api::FlatPart;
 use crate::inpaint::{Ctx, Inpainter, TileSpec};
 use crate::maskops;
@@ -441,10 +441,10 @@ pub fn plan_tiles(mask: &GrayImage, spec: &TileSpec) -> (Vec<u32>, Vec<Tile>) {
     (labels, bounded)
 }
 
-/// Genişletilmiş maskeyi (`m`) seçilen modelle Koharu gibi karo karo temizler: her karo yerel çözünürlükte modele gider
-/// (yalnızca model boyut katına dolgu), çıktının yalnızca karonun maske bileşenlerinden çekirdek içine düşen pikselleri sayfaya
-/// yazılır; maske dışı hiçbir piksel değişmez. Difüzyon karolarında MangaTranslator son işlemi uygulanır (bkz. `postproc`).
-/// Not: Koharu'nun kendisi ton eşleme/tüy yapmaz, sert yapıştırır; LaMa karoları öyle yapıştırılır. `_p.feather` yalnızca düz doldurmada kullanılır.
+/// Genişletilmiş maskeyi (`m`) seçilen modelle temizler. Redraw (difüzyon) modelleri MangaTranslator bölge yolundan geçer
+/// (`clean_regions_mt`). LaMa Koharu gibi karo karo çalışır: her karo yerel çözünürlükte modele gider (yalnızca model boyut katına
+/// dolgu), çıktının yalnızca karonun maske bileşenlerinden çekirdek içine düşen pikselleri sayfaya sert yapıştırılır (Koharu ton
+/// eşleme/tüy yapmaz); maske dışı hiçbir piksel değişmez. `_p.feather` yalnızca düz doldurmada kullanılır.
 pub fn clean_dilated(
     img: &RgbImage,
     m: GrayImage,
@@ -457,10 +457,8 @@ pub fn clean_dilated(
     if spec.mt_regions {
         return clean_regions_mt(img, m, inp, cancel, progress);
     }
-    let (iw, ih) = img.dimensions();
+    let (iw, _ih) = img.dimensions();
     let (labels, tiles) = plan_tiles(&m, &spec);
-    let post = if spec.postprocess { postproc::Post::from_env() } else { postproc::Post::None };
-    let radius = postproc::glyph_radius(iw, ih);
     let mut work = img.clone();
     let mut pending = m;
     let total = tiles.len();
@@ -485,34 +483,22 @@ pub fn clean_dilated(
         if out.dimensions() != (cw, ch) {
             bail!("model beklenmeyen boyut döndürdü: {:?} (beklenen {}x{})", out.dimensions(), cw, ch);
         }
-        // yeniden çizim modelleri (özellikle Qwen) çıktıyı birkaç piksel kaydırabiliyor: maske dışına bakıp geri hizala
-        let out = if spec.postprocess && std::env::var_os("SAFINK_NOALIGN").is_none() { align_to(&crop, out, &cm) } else { out };
         // karonun sahip olduğu pikseller: çekirdek içinde, karonun bileşenlerinden
         let [kx0, ky0, kx1, ky1] = t.core;
         let mut own = vec![false; (cw * ch) as usize];
-        let mut lab_crop = vec![0u32; (cw * ch) as usize];
         for y in ky0..ky1 {
             for x in kx0..kx1 {
                 let l = labels[(y * iw + x) as usize];
                 if l != 0 && t.components.binary_search(&l).is_ok() {
                     let k = ((y - cy0) * cw + (x - cx0)) as usize;
                     own[k] = true;
-                    lab_crop[k] = l;
                 }
             }
         }
-        let patch = match post {
-            postproc::Post::None => out,
-            postproc::Post::Lum => postproc::match_luminance(&crop, &out, &cm),
-            postproc::Post::Full => {
-                let lum = postproc::match_luminance(&crop, &out, &cm);
-                postproc::composite_glyphs(&crop, &lum, &cm, &own, &lab_crop, radius)
-            }
-        };
         for y in 0..ch {
             for x in 0..cw {
                 if own[(y * cw + x) as usize] {
-                    work.put_pixel(cx0 + x, cy0 + y, *patch.get_pixel(x, y));
+                    work.put_pixel(cx0 + x, cy0 + y, *out.get_pixel(x, y));
                     pending.put_pixel(cx0 + x, cy0 + y, image::Luma([0]));
                 }
             }
@@ -525,11 +511,41 @@ pub fn clean_dilated(
 /// `align_to` düzeltmesinin uygulandığı kırpıntı sayısı (ölçüm/tanı sayacı).
 pub static ALIGN_FIRED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// MangaTranslator bölge yolu (Qwen): genişletilmiş (düz doldurma sonrası kalan) maskenin her 8-bağlantılı bileşeni için sırayla
+/// MangaTranslator bölge yolu (Klein): genişletilmiş (düz doldurma sonrası kalan) maskenin her 8-bağlantılı bileşeni için sırayla
 /// (sayfa sırası: üstten alta, soldan sağa), o anki çalışma görüntüsünden bir kırpıntı alınır (`mtcrop::plan_crop`); model ham kırpıntıyı
 /// ~1 MP'de işler (ölçekleme `Inpainter::inpaint` içinde); sonra `align_to` (güvenlik ağı), `_match_luminance`, bileşen kutusuna kırpılmış
 /// sert maskeyle yapıştırma ve glif kompoziti. Bileşen maskesi dışındaki hiçbir piksel değişmez.
 pub fn clean_regions_mt(img: &RgbImage, m: GrayImage, inp: &mut dyn Inpainter, cancel: &AtomicBool, progress: &dyn Fn(usize, usize)) -> Result<RgbImage> {
+    clean_regions_mt_dbg(img, m, inp, cancel, progress, None)
+}
+
+/// Tanı: bir bölgenin her işleme adımındaki kırpıntı boyutlu görüntüleri (`clean_regions_mt_dbg`).
+pub struct RegionDebug {
+    pub index: usize,
+    /// bileşen kutusu [x0, y0, x1, y1] (dahil) ve kırpıntı kutusu (x, y, w, h), sayfa koordinatı
+    pub bbox: [u32; 4],
+    pub crop_rect: [u32; 4],
+    pub crop: RgbImage,
+    /// bölge maskesi (modele verilen maske)
+    pub mask: GrayImage,
+    /// yapıştırma maskesi (`composite_mask`)
+    pub own: GrayImage,
+    /// ham model çıktısı (kırpıntı boyutuna ölçeklenmiş, son işlem yok)
+    pub raw: RgbImage,
+    pub aligned: RgbImage,
+    pub lum: RgbImage,
+    /// glif kompoziti sonrası (sayfaya yazılan)
+    pub patch: RgbImage,
+}
+
+pub fn clean_regions_mt_dbg(
+    img: &RgbImage,
+    m: GrayImage,
+    inp: &mut dyn Inpainter,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(usize, usize),
+    mut dbg: Option<&mut dyn FnMut(RegionDebug)>,
+) -> Result<RgbImage> {
     let (iw, ih) = img.dimensions();
     let (labels, spans) = label_components(&m);
     let n = spans.len().saturating_sub(1);
@@ -549,6 +565,7 @@ pub fn clean_regions_mt(img: &RgbImage, m: GrayImage, inp: &mut dyn Inpainter, c
     let mut order: Vec<usize> = (1..=n).collect();
     order.sort_by_key(|&l| (bb[l][1], bb[l][0], bb[l][3], bb[l][2]));
     let radius = postproc::glyph_radius(iw, ih);
+    let mult = inp.tile_spec().multiple;
     let mut work = img.clone();
     progress(0, order.len());
     for (k, &l) in order.iter().enumerate() {
@@ -556,7 +573,7 @@ pub fn clean_regions_mt(img: &RgbImage, m: GrayImage, inp: &mut dyn Inpainter, c
             bail!("iptal edildi");
         }
         let b = bb[l];
-        if let Some(plan) = crate::mtcrop::plan_crop(b, iw, ih, 32) {
+        if let Some(plan) = crate::mtcrop::plan_crop(b, iw, ih, mult) {
             let (cw, ch) = (plan.w, plan.h);
             let crop = image::imageops::crop_imm(&work, plan.x, plan.y, cw, ch).to_image();
             // bölge maskesi: yalnızca bu bileşen (MT: bölge başına maske)
@@ -583,13 +600,17 @@ pub fn clean_regions_mt(img: &RgbImage, m: GrayImage, inp: &mut dyn Inpainter, c
             }
             let lum = postproc::match_luminance(&crop, &aligned, &cm);
             let lab: Vec<u32> = own.iter().map(|&o| o as u32).collect();
-            let patch = if postproc::Post::from_env() == postproc::Post::Full { postproc::composite_glyphs(&crop, &lum, &cm, &own, &lab, radius) } else { lum };
+            let patch = if postproc::Post::from_env() == postproc::Post::Full { postproc::composite_glyphs(&crop, &lum, &cm, &own, &lab, radius) } else { lum.clone() };
             for y in 0..ch {
                 for x in 0..cw {
                     if own[(y * cw + x) as usize] {
                         work.put_pixel(plan.x + x, plan.y + y, *patch.get_pixel(x, y));
                     }
                 }
+            }
+            if let Some(f) = dbg.as_mut() {
+                let own_img = GrayImage::from_fn(cw, ch, |x, y| image::Luma([if own[(y * cw + x) as usize] { 255 } else { 0 }]));
+                f(RegionDebug { index: k, bbox: b, crop_rect: [plan.x, plan.y, cw, ch], crop, mask: cm, own: own_img, raw: out, aligned, lum, patch });
             }
         }
         progress(k + 1, order.len());
@@ -811,12 +832,12 @@ mod tests {
     }
 
     #[test]
-    fn diffusion_tile_postprocess_keeps_outside_mask_and_cleans_text() {
-        // gri zemin + yazı; "difüzyon" modeli zemini 3 seviye koyulaştırıp maske içini düz gri yapar
+    fn diffusion_region_postprocess_keeps_outside_mask_and_cleans_text() {
+        // (bölge yolu) gri zemin + yazı; "difüzyon" modeli zemini 3 seviye koyulaştırıp maske içini düz gri yapar
         struct Diff;
         impl Inpainter for Diff {
             fn label(&self) -> String { "diff".into() }
-            fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, ..TileSpec::DEFAULT } }
+            fn tile_spec(&self) -> TileSpec { TileSpec::redraw(16) }
             fn inpaint(&mut self, img: &RgbImage, _m: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
                 Ok(RgbImage::from_pixel(img.width(), img.height(), Rgb([197, 197, 197])))
             }
@@ -1008,15 +1029,16 @@ mod tests {
         assert_eq!(flat_pass(&img, &mask, 2, None).stats, FlatStats { flat: 0, model: 1 });
     }
 
-    /// MangaTranslator bölge yolu: bileşen başına tek çağrı, kırpıntı 32'nin katı ve sayfa içinde, maske dışı bayt bayt aynı.
+    /// MangaTranslator bölge yolu: bileşen başına tek çağrı, kırpıntı `multiple`'ın katı (16 ve 32 denenir) ve sayfa içinde, maske dışı bayt bayt aynı.
     #[test]
     fn mt_regions_one_call_per_component_and_outside_mask_byte_identical() {
         struct MtMock {
             calls: Vec<(u32, u32)>,
+            multiple: u32,
         }
         impl Inpainter for MtMock {
             fn label(&self) -> String { "mt".into() }
-            fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, mt_regions: true, ..TileSpec::DEFAULT } }
+            fn tile_spec(&self) -> TileSpec { TileSpec::redraw(self.multiple) }
             fn inpaint(&mut self, img: &RgbImage, _m: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
                 self.calls.push(img.dimensions());
                 // tüm kırpıntıyı yeniden çizer (maske dışı da değişir) -> yalnız bileşen pikselleri geçmeli
@@ -1029,10 +1051,11 @@ mod tests {
         let mut mask = GrayImage::new(500, 400);
         rect(&mut mask, 98, 88, 162, 102);
         rect(&mut mask, 298, 248, 342, 264);
-        let mut mk = MtMock { calls: vec![] };
+        for m in [16u32, 32] {
+        let mut mk = MtMock { calls: vec![], multiple: m };
         let out = clean_dilated(&img, mask.clone(), &params(0), &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
         assert_eq!(mk.calls.len(), 2);
-        assert!(mk.calls.iter().all(|c| c.0 % 32 == 0 && c.1 % 32 == 0 && c.0 >= 64 && c.1 >= 64 && c.0 <= 500 && c.1 <= 400), "{:?}", mk.calls);
+        assert!(mk.calls.iter().all(|c| c.0 % m == 0 && c.1 % m == 0 && c.0 >= 64 && c.1 >= 64 && c.0 <= 500 && c.1 <= 400), "{:?}", mk.calls);
         for (x, y, p) in out.enumerate_pixels() {
             if mask.get_pixel(x, y)[0] < 128 {
                 assert_eq!(p, img.get_pixel(x, y), "maske dışı değişti {x},{y}");
@@ -1041,5 +1064,6 @@ mod tests {
         // yazı gitti
         assert!(out.get_pixel(130, 95)[0] > 150);
         assert!(out.get_pixel(320, 255)[0] > 150);
+        }
     }
 }

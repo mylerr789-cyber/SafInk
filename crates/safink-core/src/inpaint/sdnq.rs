@@ -19,7 +19,7 @@ pub struct SdnqInpainter {
     counter: u32,
     steps: u32,
     guidance: f64,
-    prep: super::InputPrep,
+    prompt: String,
 }
 
 impl SdnqInpainter {
@@ -32,7 +32,7 @@ impl SdnqInpainter {
             counter: 0,
             steps: pu("steps", 4) as u32,
             guidance: spec.params.get("guidance").and_then(|v| v.as_f64()).unwrap_or(1.0),
-            prep: super::InputPrep::new(paths, spec, settings)?,
+            prompt: super::prompt_of(spec),
         };
         let load = serde_json::json!({
             "cmd": "load",
@@ -50,8 +50,8 @@ impl SdnqInpainter {
 
 impl Inpainter for SdnqInpainter {
     fn label(&self) -> String { format!("SDNQ · {}", self.spec.name) }
-    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, mt_regions: super::is_mt(&self.spec.params), ..TileSpec::DEFAULT } }
-    fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
+    fn tile_spec(&self) -> TileSpec { TileSpec::redraw(super::multiple_of(&self.spec.params)) }
+    fn inpaint(&mut self, img: &RgbImage, _mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
             bail!(crate::loc::pick("iptal edildi", "cancelled"));
         }
@@ -59,21 +59,15 @@ impl Inpainter for SdnqInpainter {
         let (w0, h0) = img.dimensions();
         let inp = self.w.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.w.workdir.join(format!("out_{}.png", self.counter));
-        let prepared = self.prep.prepare(img, mask, ctx)?;
-        // MangaTranslator yolu (Qwen): ~1 MP'ye büyüt; worker `output_resolution = sqrt(w*h)` ile çalışır; çıktı geri küçülür.
-        let mt = super::is_mt(&self.spec.params);
-        let padded = if mt {
-            let mult = self.spec.params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(32) as u32;
-            let (sw, sh) = crate::mtcrop::inference_size(w0, h0, mult);
-            crate::mtcrop::scale_to(&prepared, sw, sh)
-        } else {
-            super::pad_for(&prepared, &self.spec.params)
-        };
+        // MangaTranslator yolu: ham kırpıntı ~1 MP'ye büyütülür, worker o boyutta çalışır; çıktı geri küçülür.
+        let mult = super::multiple_of(&self.spec.params);
+        let (sw, sh) = crate::mtcrop::inference_size(w0, h0, mult);
+        let padded = crate::mtcrop::scale_to(img, sw, sh);
         let pd = padded.dimensions();
         padded.save(&inp)?;
         let r = self.w.call(&serde_json::json!({
             "cmd": "edit", "image": inp.to_string_lossy(), "out": outp.to_string_lossy(),
-            "prompt": self.prep.prompt, "steps": self.steps, "guidance": self.guidance, "seed": 1,
+            "prompt": self.prompt, "steps": self.steps, "guidance": self.guidance, "seed": 1,
         }))?;
         if r["ok"] != true {
             bail!(crate::t!("yeniden çizim hatası: {}", "redraw error: {}", r["error"]));
@@ -82,12 +76,9 @@ impl Inpainter for SdnqInpainter {
         for p in [&inp, &outp] {
             let _ = std::fs::remove_file(p);
         }
-        if mt {
-            if out.dimensions() != pd {
-                bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), pd.0, pd.1));
-            }
-            return Ok(crate::mtcrop::scale_to(&out, w0, h0));
+        if out.dimensions() != pd {
+            bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), pd.0, pd.1));
         }
-        super::crop_to(out, w0, h0, pd)
+        Ok(crate::mtcrop::scale_to(&out, w0, h0))
     }
 }

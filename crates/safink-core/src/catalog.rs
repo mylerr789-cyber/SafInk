@@ -62,7 +62,7 @@ pub struct ModelSpec {
     pub recommended: bool,
     #[serde(default)]
     pub hf_repo: String,
-    /// Modele özel sabitler: steps, guidance, cfg, sampler, input_mode (original|raw|green|lama_prefill), mt_crop (MangaTranslator bölge yolu), prompt / prompt_green / prompt_lama_prefill, offload, pipeline, multiple.
+    /// Modele özel sabitler: steps, guidance, cfg, sampler, prompt (MangaTranslator komutu; redraw modelleri hep MangaTranslator bölge yolundan geçer), multiple (kırpıntı/çıkarım boyut katı), offload, pipeline, multiple.
     #[serde(default)]
     pub params: serde_json::Value,
     /// "fast" dosya takımı seçilince `params` üzerine eklenen/ezilen değerler (örn. önbellek ayarı, nicemleme etiketi).
@@ -416,20 +416,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn qwen_follows_mangatranslator_and_klein_keeps_green() {
+    fn klein_follows_mangatranslator_and_no_qwen_entry() {
         let c: Catalog = serde_json::from_str(EMBEDDED).unwrap();
-        for id in ["sdcpp-qwen-image-2-1-turbo", "sdnq-qwen-image-2-1-turbo"] {
-            let p = &c.get(id).unwrap().params;
-            assert_eq!(p["input_mode"], "raw", "{id}");
-            assert_eq!(p["mt_crop"], true, "{id}");
-            assert_eq!(p["multiple"], 32, "{id}");
-            assert_eq!(p["prompt"], "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.");
-            assert!(p.get("ref_area").is_none());
-        }
+        assert!(c.models.iter().all(|m| !m.id.to_lowercase().contains("qwen")), "Qwen-Image girdisi kalmamalı");
+        assert!(c.get("sdcpp-qwen-image-2-1-turbo").is_none() && c.get("sdnq-qwen-image-2-1-turbo").is_none());
         for id in ["sdcpp-flux2-klein-4b", "sdnq-flux2-klein-4b"] {
             let p = &c.get(id).unwrap().params;
-            assert_eq!(p["input_mode"], "green", "{id}");
-            assert!(!crate::inpaint::is_mt(p), "{id}");
+            assert!(p.get("input_mode").is_none() && p.get("mt_crop").is_none(), "{id}");
+            assert_eq!(p["multiple"], 16, "{id}");
+            assert_eq!(p["steps"], 4, "{id}");
+            assert_eq!(p["guidance"], 1.0, "{id}");
+            assert!(p.get("prompt_green").is_none() && p.get("prompt_lama_prefill").is_none() && p.get("sigmas").is_none(), "{id}");
+            assert_eq!(p["prompt"], "Erase only the lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.");
         }
+        assert_eq!(c.get("sdcpp-flux2-klein-4b").unwrap().params["cfg"], 1.0);
+        assert_eq!(c.get("sdcpp-flux2-klein-4b").unwrap().params["sampler"], "euler");
     }
 }
