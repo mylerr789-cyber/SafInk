@@ -109,7 +109,10 @@ add(id="sdnq-flux2-klein-4b", name="FLUX.2 Klein 4B (NVIDIA)", backend="sdnq", k
 
 # ---- Qwen-Image 2.1 Turbo (MangaTranslator core/ml/model_manager.py + utils/model_metadata.py ile aynı dosyalar):
 # 8 adım sabit sigma çizelgesi ("--sigmas qwen-image-2.1-turbo"), cfg 1, euler; metin kodlayıcı Qwen3-VL-8B (+ mmproj), 32'nin katı çözünürlük. ----
-QWEN = {"steps": 8, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "sigmas": "qwen-image-2.1-turbo", "multiple": 32, **PAGE}
+# MangaTranslator yolu (inpaint/mod.rs `is_mt`, mtcrop.rs): bölge başına ham kırpıntı (yeşil boya yok, maske modele verilmez),
+# komut = MT'nin sabit komutu, kırpıntı ~1 MP'ye büyütülür, çıktı geri küçülür.
+QWEN = {"steps": 8, "cfg": 1.0, "guidance": 1.0, "sampler": "euler", "offload": True, "sigmas": "qwen-image-2.1-turbo", "multiple": 32,
+        **PAGE, "input_mode": "raw", "mt_crop": True}
 add(id="sdcpp-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo", backend="sdcpp", kind="redraw", mode="edit",
     description="Qwen-Image 2.1 Turbo ile yazı yerini çevresine uygun yeniden çizer; Klein'dan ağır ve yavaş.", description_en="Redraws the text area to match its surroundings with Qwen-Image 2.1 Turbo; heavier and slower than Klein.",
     license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
@@ -128,7 +131,7 @@ add(id="sdnq-qwen-image-2-1-turbo", name="Qwen-Image 2.1 Turbo (NVIDIA)", backen
     description="Aynı model, NVIDIA kartlar için 4-bit SDNQ sürümü; daha az VRAM kullanır.", description_en="Same model, 4-bit SDNQ build for NVIDIA cards; uses less VRAM.",
     license="Qwen Research (ticari olmayan)", license_url="https://huggingface.co/Qwen/Qwen-Image-2.1-Turbo/blob/main/LICENSE",
     min_vram_gb=10, min_ram_gb=24, hf_repo=repo, notes="Qwen3-VL-8B metin kodlayıcı dahil; 8 adım sabit. RTX 4060 Ti 16 GB: sayfa başına ~70 sn, en çok ~10,5 GB VRAM.",
-    params={"pipeline": "QwenImage21Pipeline", "steps": 8, "multiple": 32, "quant": "4-bit dinamik · Hadamard", **PAGE},
+    params={"pipeline": "QwenImage21Pipeline", "steps": 8, "multiple": 32, "quant": "4-bit dinamik · Hadamard", **PAGE, "input_mode": "raw", "mt_crop": True},
     files=hf_repo_all(repo))
 
 json.dump({"version": 2, "sdcpp_tag": tag, "models": models}, sys.stdout, indent=1, ensure_ascii=False)

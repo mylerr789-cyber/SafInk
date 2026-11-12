@@ -454,6 +454,9 @@ pub fn clean_dilated(
     progress: &dyn Fn(usize, usize),
 ) -> Result<RgbImage> {
     let spec = inp.tile_spec();
+    if spec.mt_regions {
+        return clean_regions_mt(img, m, inp, cancel, progress);
+    }
     let (iw, ih) = img.dimensions();
     let (labels, tiles) = plan_tiles(&m, &spec);
     let post = if spec.postprocess { postproc::Post::from_env() } else { postproc::Post::None };
@@ -482,6 +485,8 @@ pub fn clean_dilated(
         if out.dimensions() != (cw, ch) {
             bail!("model beklenmeyen boyut döndürdü: {:?} (beklenen {}x{})", out.dimensions(), cw, ch);
         }
+        // yeniden çizim modelleri (özellikle Qwen) çıktıyı birkaç piksel kaydırabiliyor: maske dışına bakıp geri hizala
+        let out = if spec.postprocess && std::env::var_os("SAFINK_NOALIGN").is_none() { align_to(&crop, out, &cm) } else { out };
         // karonun sahip olduğu pikseller: çekirdek içinde, karonun bileşenlerinden
         let [kx0, ky0, kx1, ky1] = t.core;
         let mut own = vec![false; (cw * ch) as usize];
@@ -515,6 +520,127 @@ pub fn clean_dilated(
         progress(i + 1, total);
     }
     Ok(work)
+}
+
+/// `align_to` düzeltmesinin uygulandığı kırpıntı sayısı (ölçüm/tanı sayacı).
+pub static ALIGN_FIRED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// MangaTranslator bölge yolu (Qwen): genişletilmiş (düz doldurma sonrası kalan) maskenin her 8-bağlantılı bileşeni için sırayla
+/// (sayfa sırası: üstten alta, soldan sağa), o anki çalışma görüntüsünden bir kırpıntı alınır (`mtcrop::plan_crop`); model ham kırpıntıyı
+/// ~1 MP'de işler (ölçekleme `Inpainter::inpaint` içinde); sonra `align_to` (güvenlik ağı), `_match_luminance`, bileşen kutusuna kırpılmış
+/// sert maskeyle yapıştırma ve glif kompoziti. Bileşen maskesi dışındaki hiçbir piksel değişmez.
+pub fn clean_regions_mt(img: &RgbImage, m: GrayImage, inp: &mut dyn Inpainter, cancel: &AtomicBool, progress: &dyn Fn(usize, usize)) -> Result<RgbImage> {
+    let (iw, ih) = img.dimensions();
+    let (labels, spans) = label_components(&m);
+    let n = spans.len().saturating_sub(1);
+    let mut bb = vec![[u32::MAX, u32::MAX, 0u32, 0u32]; n + 1]; // [x_min, y_min, x_max, y_max] dahil
+    for y in 0..ih {
+        for x in 0..iw {
+            let l = labels[(y * iw + x) as usize] as usize;
+            if l != 0 {
+                let b = &mut bb[l];
+                b[0] = b[0].min(x);
+                b[1] = b[1].min(y);
+                b[2] = b[2].max(x);
+                b[3] = b[3].max(y);
+            }
+        }
+    }
+    let mut order: Vec<usize> = (1..=n).collect();
+    order.sort_by_key(|&l| (bb[l][1], bb[l][0], bb[l][3], bb[l][2]));
+    let radius = postproc::glyph_radius(iw, ih);
+    let mut work = img.clone();
+    progress(0, order.len());
+    for (k, &l) in order.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            bail!("iptal edildi");
+        }
+        let b = bb[l];
+        if let Some(plan) = crate::mtcrop::plan_crop(b, iw, ih, 32) {
+            let (cw, ch) = (plan.w, plan.h);
+            let crop = image::imageops::crop_imm(&work, plan.x, plan.y, cw, ch).to_image();
+            // bölge maskesi: yalnızca bu bileşen (MT: bölge başına maske)
+            let mut cm = GrayImage::new(cw, ch);
+            let mut own = vec![false; (cw * ch) as usize];
+            for y in 0..ch {
+                for x in 0..cw {
+                    if labels[((plan.y + y) * iw + plan.x + x) as usize] as usize == l {
+                        cm.put_pixel(x, y, image::Luma([255]));
+                    }
+                }
+            }
+            let clip = [b[0], b[1], b[2] + 1, b[3] + 1];
+            for (i, v) in crate::mtcrop::composite_mask(&cm, &plan, clip).into_iter().enumerate() {
+                own[i] = v;
+            }
+            let out = inp.inpaint(&crop, &cm, &Ctx { cancel })?;
+            if out.dimensions() != (cw, ch) {
+                bail!("model beklenmeyen boyut döndürdü: {:?} (beklenen {}x{})", out.dimensions(), cw, ch);
+            }
+            let aligned = align_to(&crop, out.clone(), &cm);
+            if aligned.as_raw() != out.as_raw() {
+                ALIGN_FIRED.fetch_add(1, Ordering::Relaxed);
+            }
+            let lum = postproc::match_luminance(&crop, &aligned, &cm);
+            let lab: Vec<u32> = own.iter().map(|&o| o as u32).collect();
+            let patch = if postproc::Post::from_env() == postproc::Post::Full { postproc::composite_glyphs(&crop, &lum, &cm, &own, &lab, radius) } else { lum };
+            for y in 0..ch {
+                for x in 0..cw {
+                    if own[(y * cw + x) as usize] {
+                        work.put_pixel(plan.x + x, plan.y + y, *patch.get_pixel(x, y));
+                    }
+                }
+            }
+        }
+        progress(k + 1, order.len());
+    }
+    Ok(work)
+}
+
+/// Model çıktısını girdiye hizalar: maske dışındaki (maskeden ≥6 px uzak) piksellerde ±8 px içinde en düşük ortalama farkı veren
+/// tam sayı kaymayı bulur ve çıktıyı o kadar geri kaydırır (kenarlar tekrarlanır). Kayma yoksa ya da kazanç %5'ten azsa çıktı aynen döner.
+pub fn align_to(src: &RgbImage, out: RgbImage, mask: &GrayImage) -> RgbImage {
+    const R: i32 = 8;
+    let (w, h) = src.dimensions();
+    if w <= (2 * R + 4) as u32 || h <= (2 * R + 4) as u32 {
+        return out;
+    }
+    let far = maskops::dilate(mask, 6);
+    let lum = |p: &image::Rgb<u8>| (p[0] as i32 * 77 + p[1] as i32 * 150 + p[2] as i32 * 29) >> 8;
+    // hız için örnek noktalar: maske dışı, kenardan R uzak, 2 px adım
+    let mut pts: Vec<(i32, i32, i32)> = Vec::new();
+    for y in (R..h as i32 - R).step_by(2) {
+        for x in (R..w as i32 - R).step_by(2) {
+            if far.get_pixel(x as u32, y as u32)[0] < 128 {
+                pts.push((x, y, lum(src.get_pixel(x as u32, y as u32))));
+            }
+        }
+    }
+    if pts.len() < 200 {
+        return out;
+    }
+    let ol: Vec<i32> = out.pixels().map(lum).collect();
+    let err = |dx: i32, dy: i32| -> u64 { pts.iter().map(|&(x, y, v)| (ol[((y + dy) as u32 * w + (x + dx) as u32) as usize] - v).unsigned_abs() as u64).sum() };
+    let base = err(0, 0);
+    let mut best = (base, 0, 0);
+    for dy in -R..=R {
+        for dx in -R..=R {
+            let e = err(dx, dy);
+            if e < best.0 {
+                best = (e, dx, dy);
+            }
+        }
+    }
+    let (e, dx, dy) = best;
+    if (dx, dy) == (0, 0) || e as f64 > base as f64 * 0.95 {
+        return out;
+    }
+    // çıktıdaki içerik girdide (x, y)'de olanı (x+dx, y+dy)'de çizmiş: geri al
+    RgbImage::from_fn(w, h, |x, y| {
+        let sx = (x as i32 + dx).clamp(0, w as i32 - 1) as u32;
+        let sy = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+        *out.get_pixel(sx, sy)
+    })
 }
 
 /// 8-bağlantılı bileşen etiketleri (0 = arka plan, 1..=n) ve her etiketin (y0, y1) aralığı.
@@ -589,6 +715,20 @@ mod tests {
     }
 
     fn params(dilation: u32) -> CleanParams { CleanParams { dilation, feather: 2, flat_fill: false } }
+
+    #[test]
+    fn align_to_undoes_a_shifted_model_output() {
+        let src = RgbImage::from_fn(120, 90, |x, y| { let v = ((x * 7 + y * 13) % 97 * 2) as u8; Rgb([v, v, v]) });
+        let shifted = RgbImage::from_fn(120, 90, |x, y| *src.get_pixel((x + 3).min(119), (y + 117 - 2).min(89 + 117) .saturating_sub(117).min(89)));
+        let mut mask = GrayImage::new(120, 90);
+        rect(&mut mask, 50, 35, 70, 55);
+        let fixed = align_to(&src, shifted.clone(), &mask);
+        // iç bölgede hizalı
+        let d: u64 = (20..100).flat_map(|x| (20..70).map(move |y| (x, y))).map(|(x, y)| (fixed.get_pixel(x, y)[0] as i64 - src.get_pixel(x, y)[0] as i64).unsigned_abs()).sum();
+        assert_eq!(d, 0);
+        // kaymasız çıktı aynen kalır
+        assert_eq!(align_to(&src, src.clone(), &mask).as_raw(), src.as_raw());
+    }
 
     #[test]
     fn tiles_geometry_cores_crops_and_exact_cover() {
@@ -866,5 +1006,40 @@ mod tests {
         fill_rect(&mut img, 40, 74, 76, 77, Rgb([120, 120, 120]));
         fill_rect(&mut img, 164, 74, 200, 77, Rgb([120, 120, 120]));
         assert_eq!(flat_pass(&img, &mask, 2, None).stats, FlatStats { flat: 0, model: 1 });
+    }
+
+    /// MangaTranslator bölge yolu: bileşen başına tek çağrı, kırpıntı 32'nin katı ve sayfa içinde, maske dışı bayt bayt aynı.
+    #[test]
+    fn mt_regions_one_call_per_component_and_outside_mask_byte_identical() {
+        struct MtMock {
+            calls: Vec<(u32, u32)>,
+        }
+        impl Inpainter for MtMock {
+            fn label(&self) -> String { "mt".into() }
+            fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, mt_regions: true, ..TileSpec::DEFAULT } }
+            fn inpaint(&mut self, img: &RgbImage, _m: &GrayImage, _c: &Ctx) -> Result<RgbImage> {
+                self.calls.push(img.dimensions());
+                // tüm kırpıntıyı yeniden çizer (maske dışı da değişir) -> yalnız bileşen pikselleri geçmeli
+                Ok(RgbImage::from_pixel(img.width(), img.height(), Rgb([197, 197, 197])))
+            }
+        }
+        let mut img = RgbImage::from_fn(500, 400, |x, y| Rgb([200, (x % 7) as u8 * 3, (y % 5) as u8 * 4]));
+        fill_rect(&mut img, 100, 90, 160, 100, Rgb([0, 0, 0]));
+        fill_rect(&mut img, 300, 250, 340, 262, Rgb([0, 0, 0]));
+        let mut mask = GrayImage::new(500, 400);
+        rect(&mut mask, 98, 88, 162, 102);
+        rect(&mut mask, 298, 248, 342, 264);
+        let mut mk = MtMock { calls: vec![] };
+        let out = clean_dilated(&img, mask.clone(), &params(0), &mut mk, &AtomicBool::new(false), &|_, _| {}).unwrap();
+        assert_eq!(mk.calls.len(), 2);
+        assert!(mk.calls.iter().all(|c| c.0 % 32 == 0 && c.1 % 32 == 0 && c.0 >= 64 && c.1 >= 64 && c.0 <= 500 && c.1 <= 400), "{:?}", mk.calls);
+        for (x, y, p) in out.enumerate_pixels() {
+            if mask.get_pixel(x, y)[0] < 128 {
+                assert_eq!(p, img.get_pixel(x, y), "maske dışı değişti {x},{y}");
+            }
+        }
+        // yazı gitti
+        assert!(out.get_pixel(130, 95)[0] > 150);
+        assert!(out.get_pixel(320, 255)[0] > 150);
     }
 }

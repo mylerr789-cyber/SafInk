@@ -62,7 +62,7 @@ pub struct ModelSpec {
     pub recommended: bool,
     #[serde(default)]
     pub hf_repo: String,
-    /// Modele özel sabitler: steps, guidance, cfg, sampler, input_mode (original|green|lama_prefill), prompt / prompt_green / prompt_lama_prefill, offload, pipeline, multiple.
+    /// Modele özel sabitler: steps, guidance, cfg, sampler, input_mode (original|raw|green|lama_prefill), mt_crop (MangaTranslator bölge yolu), prompt / prompt_green / prompt_lama_prefill, offload, pipeline, multiple.
     #[serde(default)]
     pub params: serde_json::Value,
     /// "fast" dosya takımı seçilince `params` üzerine eklenen/ezilen değerler (örn. önbellek ayarı, nicemleme etiketi).
@@ -408,5 +408,28 @@ pub fn fit_hint(m: &ModelSpec, hw: &Hardware) -> &'static str {
         "tight"
     } else {
         "no"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qwen_follows_mangatranslator_and_klein_keeps_green() {
+        let c: Catalog = serde_json::from_str(EMBEDDED).unwrap();
+        for id in ["sdcpp-qwen-image-2-1-turbo", "sdnq-qwen-image-2-1-turbo"] {
+            let p = &c.get(id).unwrap().params;
+            assert_eq!(p["input_mode"], "raw", "{id}");
+            assert_eq!(p["mt_crop"], true, "{id}");
+            assert_eq!(p["multiple"], 32, "{id}");
+            assert_eq!(p["prompt"], "Erase only the Japanese lettering and sound effect characters. Do not remove or alter any other lines or marks in the artwork.");
+            assert!(p.get("ref_area").is_none());
+        }
+        for id in ["sdcpp-flux2-klein-4b", "sdnq-flux2-klein-4b"] {
+            let p = &c.get(id).unwrap().params;
+            assert_eq!(p["input_mode"], "green", "{id}");
+            assert!(!crate::inpaint::is_mt(p), "{id}");
+        }
     }
 }

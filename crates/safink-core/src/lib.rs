@@ -8,6 +8,7 @@ pub mod imgio;
 pub mod inpaint;
 pub mod loc;
 pub mod maskops;
+pub mod mtcrop;
 pub mod paths;
 pub mod pipeline;
 pub mod postproc;

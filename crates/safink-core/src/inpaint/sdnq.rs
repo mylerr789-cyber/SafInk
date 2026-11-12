@@ -50,7 +50,7 @@ impl SdnqInpainter {
 
 impl Inpainter for SdnqInpainter {
     fn label(&self) -> String { format!("SDNQ · {}", self.spec.name) }
-    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, ..TileSpec::DEFAULT } }
+    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, mt_regions: super::is_mt(&self.spec.params), ..TileSpec::DEFAULT } }
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         if ctx.cancel.load(Ordering::Relaxed) {
             bail!(crate::loc::pick("iptal edildi", "cancelled"));
@@ -60,7 +60,15 @@ impl Inpainter for SdnqInpainter {
         let inp = self.w.workdir.join(format!("in_{}.png", self.counter));
         let outp = self.w.workdir.join(format!("out_{}.png", self.counter));
         let prepared = self.prep.prepare(img, mask, ctx)?;
-        let padded = super::pad_for(&prepared, &self.spec.params);
+        // MangaTranslator yolu (Qwen): ~1 MP'ye büyüt; worker `output_resolution = sqrt(w*h)` ile çalışır; çıktı geri küçülür.
+        let mt = super::is_mt(&self.spec.params);
+        let padded = if mt {
+            let mult = self.spec.params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(32) as u32;
+            let (sw, sh) = crate::mtcrop::inference_size(w0, h0, mult);
+            crate::mtcrop::scale_to(&prepared, sw, sh)
+        } else {
+            super::pad_for(&prepared, &self.spec.params)
+        };
         let pd = padded.dimensions();
         padded.save(&inp)?;
         let r = self.w.call(&serde_json::json!({
@@ -73,6 +81,12 @@ impl Inpainter for SdnqInpainter {
         let out = image::open(&outp)?.to_rgb8();
         for p in [&inp, &outp] {
             let _ = std::fs::remove_file(p);
+        }
+        if mt {
+            if out.dimensions() != pd {
+                bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), pd.0, pd.1));
+            }
+            return Ok(crate::mtcrop::scale_to(&out, w0, h0));
         }
         super::crop_to(out, w0, h0, pd)
     }

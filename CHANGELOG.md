@@ -5,6 +5,12 @@ Yeni bir sürüm çıkmadan önce "Yayınlanmadı" bölümündekiler o sürümü
 
 ## [Yayınlanmadı]
 
+## [0.6.1] - 2026-11-11
+
+- Qwen ile temizlenen yerlerin birkaç piksel kayık yapıştırılması düzeltildi: karo, Qwen'in beklediği boyuta büyütülüp gönderiliyor ve çıktı yapıştırılmadan önce çevresine göre hizalanıyor.
+
+*English:* Fixed Qwen results being pasted a few pixels off: tiles are sent at the size Qwen expects and the output is aligned to its surroundings before pasting.
+
 ## [0.6.0] - 2026-11-11
 
 - Temizleme artık sayfanın tamamını değil, yalnızca yazılı yerleri işliyor (LaMa, FLUX.2 Klein, Qwen hepsinde): yazılar kümelenir, her küme çevresiyle birlikte küçültülmeden modele gider ve sonuç yalnızca maskeli piksellere yazılır. Maske dışında tek piksel bile değişmiyor; eskiden yeniden çizim modelleri sayfanın tamamını baştan çiziyordu (balon çizgileri kayabiliyor, ince çizgiler değişiyordu). 1115×1600 sayfada Qwen ~49 sn → ~28 sn, Klein ~17 → ~14 sn.

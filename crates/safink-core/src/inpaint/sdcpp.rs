@@ -182,19 +182,38 @@ impl SdCppInpainter {
 
 impl Inpainter for SdCppInpainter {
     fn label(&self) -> String { format!("sd.cpp · {}", self.spec.name) }
-    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, ..TileSpec::DEFAULT } }
+    fn tile_spec(&self) -> TileSpec { TileSpec { postprocess: true, mt_regions: super::is_mt(&self.spec.params), ..TileSpec::DEFAULT } }
 
     fn inpaint(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         self.counter += 1;
         let (w0, h0) = img.dimensions();
         let prepared = self.prep.prepare(img, mask, ctx)?;
+        // MangaTranslator yolu (Qwen): kırpıntı ~1 MP'ye büyütülür, model o boyutta çalışır, çıktı kırpıntı boyutuna geri küçülür.
+        if super::is_mt(&self.spec.params) {
+            let mult = self.spec.params.get("multiple").and_then(|v| v.as_u64()).unwrap_or(32) as u32;
+            let (sw, sh) = crate::mtcrop::inference_size(w0, h0, mult);
+            let up = crate::mtcrop::scale_to(&prepared, sw, sh);
+            let out = if let Some(o) = self.try_server(&up, ctx)? { o } else { self.run_cli(&up, sw, sh, ctx)? };
+            if out.dimensions() != (sw, sh) {
+                bail!(crate::t!("model beklenmeyen boyut döndürdü: {}x{} (beklenen {}x{})", "model returned an unexpected size: {}x{} (expected {}x{})", out.width(), out.height(), sw, sh));
+            }
+            return Ok(crate::mtcrop::scale_to(&out, w0, h0));
+        }
         let padded = super::pad_for(&prepared, &self.spec.params);
         let (w, h) = padded.dimensions();
-        let inp = self.workdir.join(format!("in_{}.png", self.counter));
-        let outp = self.workdir.join(format!("out_{}.png", self.counter));
         if let Some(out) = self.try_server(&padded, ctx)? {
             return super::crop_to(out, w0, h0, (w, h));
         }
+        let out = self.run_cli(&padded, w, h, ctx)?;
+        super::crop_to(out, w0, h0, (w, h))
+    }
+}
+
+impl SdCppInpainter {
+    /// sd-cli ile tek görüntü (sunucu yoksa yedek yol).
+    fn run_cli(&mut self, padded: &RgbImage, w: u32, h: u32, ctx: &Ctx) -> Result<RgbImage> {
+        let inp = self.workdir.join(format!("in_{}.png", self.counter));
+        let outp = self.workdir.join(format!("out_{}.png", self.counter));
         padded.save(&inp)?;
         let mut cmd = Command::new(&self.exe);
         cmd.current_dir(self.exe.parent().unwrap());
@@ -236,6 +255,6 @@ impl Inpainter for SdCppInpainter {
         for p in [&inp, &outp] {
             let _ = std::fs::remove_file(p);
         }
-        super::crop_to(out, w0, h0, (w, h))
+        Ok(out)
     }
 }

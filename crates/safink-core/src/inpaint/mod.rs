@@ -16,15 +16,17 @@ use std::sync::atomic::AtomicBool;
 /// Koharu gibi karo planı: maske bileşenleri çekirdekleri `core` px'i aşmayan karolara gruplanır, her karo çekirdek + `context` px
 /// bağlamla yerel çözünürlükte (ölçekleme yok) modele gider. `postprocess`: difüzyon çıktısına MangaTranslator son işlemi
 /// (ışıklılık eşleme + glif kompoziti + ton eşleme) uygulanır; LaMa çıktısı sert yapıştırılır.
+/// `mt_regions`: Koharu karoları yerine MangaTranslator bölge yolu (Qwen): bileşen başına kırpıntı, ~1 MP ölçek, bkz. `mtcrop`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TileSpec {
     pub core: u32,
     pub context: u32,
     pub postprocess: bool,
+    pub mt_regions: bool,
 }
 
 impl TileSpec {
-    pub const DEFAULT: TileSpec = TileSpec { core: 512, context: 128, postprocess: false };
+    pub const DEFAULT: TileSpec = TileSpec { core: 512, context: 128, postprocess: false, mt_regions: false };
 }
 
 pub struct Ctx<'a> {
@@ -98,8 +100,14 @@ pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
     out
 }
 
+/// Katalog `params.mt_crop`: MangaTranslator bölge yolu (ham kırpıntı + ~1 MP ölçek, bkz. `mtcrop`).
+pub fn is_mt(params: &serde_json::Value) -> bool {
+    params.get("mt_crop").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
 /// Redraw modellerinin girdi hazırlığı (katalog `params.input_mode`):
 /// - `original`: sayfa olduğu gibi gider (maske modele verilmez),
+/// - `raw`: `original` ile aynı (ham kırpıntı, yeşil yok); MangaTranslator komutu `prompt` ile gelir (Qwen),
 /// - `green`: maskeli (genişletilmiş) pikseller saf #00FF00 boyanır, komut "yeşil alanları kaldır" der,
 /// - `lama_prefill`: maske önce LaMa ile doldurulur (karo karo), Flux yalnızca düzeltir.
 /// Karo çıktıları yalnızca maskeli piksellerde sayfaya yazılır. Geliştirme için `SAFINK_INPUT_MODE` / `SAFINK_PROMPT`
@@ -107,6 +115,7 @@ pub fn pad_gray(img: &GrayImage, w: u32, h: u32) -> GrayImage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
     Original,
+    Raw,
     Green,
     LamaPrefill,
 }
@@ -123,12 +132,13 @@ impl InputPrep {
         let mode_name = std::env::var("SAFINK_INPUT_MODE").ok().or_else(|| ps("input_mode")).unwrap_or_else(|| "original".into());
         let mode = match mode_name.as_str() {
             "original" => InputMode::Original,
+            "raw" => InputMode::Raw,
             "green" => InputMode::Green,
             "lama_prefill" => InputMode::LamaPrefill,
             m => bail!("bilinmeyen input_mode: {m}"),
         };
         let key = match mode {
-            InputMode::Original => "prompt",
+            InputMode::Original | InputMode::Raw => "prompt",
             InputMode::Green => "prompt_green",
             InputMode::LamaPrefill => "prompt_lama_prefill",
         };
@@ -146,7 +156,7 @@ impl InputPrep {
     /// Modele gidecek görüntü (kırpıntı boyutunda; dolgu çağıranda yapılır).
     pub fn prepare(&mut self, img: &RgbImage, mask: &GrayImage, ctx: &Ctx) -> Result<RgbImage> {
         match self.mode {
-            InputMode::Original => Ok(img.clone()),
+            InputMode::Original | InputMode::Raw => Ok(img.clone()),
             InputMode::Green => {
                 let mut o = img.clone();
                 for (x, y, m) in mask.enumerate_pixels() {
@@ -162,5 +172,31 @@ impl InputPrep {
                 crate::pipeline::clean_image(img, mask, &crate::pipeline::CleanParams { dilation: 0, feather: 0, flat_fill: false }, None, lama.as_mut(), ctx.cancel, &|_, _| {})
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgb;
+
+    #[test]
+    fn raw_input_mode_sends_the_original_crop_without_green() {
+        let mut img = RgbImage::from_pixel(64, 64, Rgb([200, 190, 180]));
+        img.put_pixel(10, 10, Rgb([0, 0, 0]));
+        let mut mask = GrayImage::new(64, 64);
+        for y in 5..20 {
+            for x in 5..20 {
+                mask.put_pixel(x, y, image::Luma([255]));
+            }
+        }
+        let mut prep = InputPrep { mode: InputMode::Raw, prompt: String::new(), lama: None };
+        let cancel = AtomicBool::new(false);
+        let out = prep.prepare(&img, &mask, &Ctx { cancel: &cancel }).unwrap();
+        assert_eq!(out.as_raw(), img.as_raw());
+        assert!(out.pixels().all(|p| *p != Rgb([0, 255, 0])));
+        // karşılaştırma: green kipi maskeli pikselleri boyar
+        let mut g = InputPrep { mode: InputMode::Green, prompt: String::new(), lama: None };
+        assert_eq!(g.prepare(&img, &mask, &Ctx { cancel: &cancel }).unwrap().get_pixel(10, 10), &Rgb([0, 255, 0]));
     }
 }
